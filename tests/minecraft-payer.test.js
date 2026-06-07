@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 
-test('minecraft payer logs the first server message after sending a payment command', async () => {
+test('minecraft payer logs the first five server messages after sending a payment command', async () => {
   const loggerPath = path.join(__dirname, '../src/lib/logger.js');
   const payerPath = path.join(__dirname, '../src/lib/minecraftPayer.js');
   delete require.cache[require.resolve(loggerPath)];
@@ -28,10 +28,12 @@ test('minecraft payer logs the first server message after sending a payment comm
   payer.ensureConnected = async () => ({
     chat: () => {
       setImmediate(() => {
-        payer.emit('serverMessage', {
-          message: 'You cannot pay while in the lobby.',
-          position: 'system',
-        });
+        for (let i = 1; i <= 6; i += 1) {
+          payer.emit('serverMessage', {
+            message: `server reply ${i}`,
+            position: i % 2 === 0 ? 'game_info' : 'system',
+          });
+        }
       });
     },
   });
@@ -41,12 +43,22 @@ test('minecraft payer logs the first server message after sending a payment comm
     /No DonutSMP payment confirmation was received/,
   );
 
-  const replyLog = infoLogs.find(args => args[0] === 'Invite Reward Minecraft Reply');
-  assert.ok(replyLog, 'expected the first Minecraft reply to be logged');
-  assert.match(replyLog[1], /You cannot pay while in the lobby/);
-  assert.deepEqual(replyLog[2], [
+  const replyLogs = infoLogs.filter(args => /^Invite Reward Minecraft Reply \d\/5$/.test(args[0]));
+  assert.equal(replyLogs.length, 5);
+  assert.deepEqual(replyLogs.map(args => args[1]), [
+    'server reply 1',
+    'server reply 2',
+    'server reply 3',
+    'server reply 4',
+    'server reply 5',
+  ]);
+  assert.deepEqual(replyLogs[0][2], [
     { name: 'Command', value: '`/pay Walksy_1 50000000`', inline: false },
     { name: 'Position', value: '`system`', inline: true },
   ]);
-  assert.deepEqual(replyLog[3], { category: 'invite' });
+  assert.deepEqual(replyLogs[1][2], [
+    { name: 'Command', value: '`/pay Walksy_1 50000000`', inline: false },
+    { name: 'Position', value: '`game_info`', inline: true },
+  ]);
+  assert.deepEqual(replyLogs[0][3], { category: 'invite' });
 });

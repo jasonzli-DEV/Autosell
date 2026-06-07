@@ -9,6 +9,8 @@ const DEFAULT_CONFIRM_TIMEOUT_MS = 20_000;
 const DEFAULT_PROFILES_FOLDER = path.join(process.cwd(), '.minecraft-auth');
 const AUTH_PROFILE = 'invite-reward-payer';
 const PACKET_TRACE_LIMIT = 80;
+const PAYMENT_REPLY_LOG_LIMIT = 5;
+const PAYMENT_REPLY_LOG_WINDOW_MS = 5_000;
 
 class MinecraftPayoutError extends Error {
   constructor(message, { type = 'minecraft_error' } = {}) {
@@ -214,16 +216,18 @@ class DonutMinecraftPayer extends EventEmitter {
         settled = true;
         clearTimeout(timer);
         this.off('message', onMessage);
-        this.off('serverMessage', onServerMessage);
         fn(value);
       };
 
-      let replyLogged = false;
+      let replyLogCount = 0;
+      const stopReplyLogging = () => {
+        clearTimeout(replyLogTimer);
+        this.off('serverMessage', onServerMessage);
+      };
       const onServerMessage = ({ message, position } = {}) => {
-        if (replyLogged) return;
-        replyLogged = true;
+        replyLogCount += 1;
         logInfo(
-          'Invite Reward Minecraft Reply',
+          `Invite Reward Minecraft Reply ${replyLogCount}/${PAYMENT_REPLY_LOG_LIMIT}`,
           `${message || '(empty message)'}`,
           [
             { name: 'Command', value: `\`${command}\``, inline: false },
@@ -231,7 +235,9 @@ class DonutMinecraftPayer extends EventEmitter {
           ],
           { category: 'invite' },
         ).catch(() => null);
+        if (replyLogCount >= PAYMENT_REPLY_LOG_LIMIT) stopReplyLogging();
       };
+      const replyLogTimer = setTimeout(stopReplyLogging, PAYMENT_REPLY_LOG_WINDOW_MS);
 
       const onMessage = (message) => {
         const parsed = parser(message);
