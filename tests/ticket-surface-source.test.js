@@ -100,3 +100,15 @@ test('ticket claim flow follows Aura ownership rules', () => {
   assert.match(claimBranch, /Ticket\.findOneAndUpdate\(\s*\{ _id: ticket\._id, claimedBy: interaction\.user\.id \}/);
   assert.match(ticketSource, /permissionOverwrites\s*\.\s*delete\(previousClaimedBy\)/);
 });
+
+test('new ticket message pings everyone and the opener only', () => {
+  const ticketSource = fs.readFileSync(path.join(__dirname, '../src/systems/tickets.js'), 'utf8');
+  const creationBranch = ticketSource.slice(
+    ticketSource.indexOf('async function createTicketFromFlow'),
+    ticketSource.indexOf('async function ensureTranscriptChannel'),
+  );
+
+  assert.match(creationBranch, /@everyone/);
+  assert.match(creationBranch, /allowedMentions:\s*\{\s*users:\s*\[member\.id\],\s*parse:\s*\['everyone'\]\s*\}/);
+  assert.doesNotMatch(creationBranch, /allowedMentions:\s*\{[^}]*roles:/);
+});

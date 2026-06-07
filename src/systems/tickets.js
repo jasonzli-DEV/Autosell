@@ -1164,7 +1164,7 @@ async function createTicketFromFlow(interaction, flow, mode) {
 
   endFlow(guild.id, member.id);
 
-  const mentionContent = [`<@${member.id}>`, staffRoleId ? `<@&${staffRoleId}>` : null].filter(Boolean).join(' ');
+  const mentionContent = [`<@${member.id}>`, '@everyone'].join(' ');
 
   const firstMessage = await channel.send({
     content: ' ',
@@ -1176,7 +1176,7 @@ async function createTicketFromFlow(interaction, flow, mode) {
       buildTicketOpeningContainer(member, flow.type, flow.details),
       ...buildTicketButtons(ticket.id),
     ],
-    allowedMentions: { users: [member.id], roles: staffRoleId ? [staffRoleId] : [] },
+    allowedMentions: { users: [member.id], parse: ['everyone'] },
   });
 
   await firstMessage.pin().catch(() => null);
