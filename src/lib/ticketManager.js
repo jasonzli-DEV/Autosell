@@ -196,7 +196,7 @@ async function createTicket(guild, member, type) {
   logInfo('Ticket Opened', `<@${member.id}> opened a **${TICKET_TYPE_LABELS[type]}** ticket`, [
     { name: 'Channel', value: channel.toString(), inline: true },
     { name: 'Type', value: TICKET_TYPE_LABELS[type], inline: true },
-  ]).catch(() => null);
+  ], { category: 'ticket' }).catch(() => null);
 
   return { ticket, channel, wasExisting: false };
 }
@@ -209,7 +209,7 @@ async function closeTicket(guild, ticket, closedById) {
   logInfo('Ticket Closed', `Ticket closed by <@${closedById}>`, [
     { name: 'Opener', value: `<@${ticket.openerId}>`, inline: true },
     { name: 'Type', value: TICKET_TYPE_LABELS[ticket.ticketType] || ticket.ticketType, inline: true },
-  ]).catch(() => null);
+  ], { category: 'ticket' }).catch(() => null);
 
   await guild.channels.delete(ticket.channelId).catch(() => null);
 

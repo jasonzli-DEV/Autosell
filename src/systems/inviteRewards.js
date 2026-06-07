@@ -484,13 +484,13 @@ async function handleInviteRewardMemberAdd(member) {
   try {
     afterInvites = await refreshGuildInviteCache(member.guild);
   } catch (err) {
-    await logError('Invite Reward Tracking Failed', `Could not fetch invites for **${member.guild.name}** after <@${member.id}> joined: ${err.message}`, [], { category: 'invite' });
+    await logError('Invite Reward Tracking Failed', `Could not fetch invites for **${member.guild.name}** after <@${member.id}> joined: ${err.message}`, [], { category: 'join' });
     return;
   }
 
   const usedInvite = findUsedInvite(before, afterInvites);
   if (!usedInvite?.inviter?.id) {
-    await logError('Invite Reward Join Not Counted', `Could not determine which invite was used by <@${member.id}>.`, [], { category: 'invite' });
+    await logError('Invite Reward Join Not Counted', `Could not determine which invite was used by <@${member.id}>.`, [], { category: 'join' });
     return;
   }
 
@@ -520,7 +520,7 @@ async function handleInviteRewardMemberAdd(member) {
       { name: 'Fake', value: fake ? 'Yes' : 'No', inline: true },
       { name: 'Rejoin', value: rejoin ? 'Yes' : 'No', inline: true },
     ],
-    { category: 'invite' },
+    { category: 'join' },
   );
 }
 
@@ -531,7 +531,7 @@ async function handleInviteRewardMemberRemove(member) {
   );
 
   if (result.modifiedCount > 0) {
-    await logInfo('Invite Reward Member Left', `<@${member.id}> left, so their invite is no longer payable.`, [], { category: 'invite' });
+    await logInfo('Invite Reward Member Left', `<@${member.id}> left, so their invite is no longer payable.`, [], { category: 'join' });
   }
 }
 
@@ -566,14 +566,14 @@ function initializeInviteRewardTracking(client) {
   client.on('guildMemberAdd', member => {
     handleInviteRewardMemberAdd(member).catch(err => {
       console.error('[InviteRewards] Failed to track member join:', err);
-      logError('Invite Reward Join Handler Failed', err.message, [], { category: 'invite' }).catch(() => null);
+      logError('Invite Reward Join Handler Failed', err.message, [], { category: 'join' }).catch(() => null);
     });
   });
 
   client.on('guildMemberRemove', member => {
     handleInviteRewardMemberRemove(member).catch(err => {
       console.error('[InviteRewards] Failed to track member leave:', err);
-      logError('Invite Reward Leave Handler Failed', err.message, [], { category: 'invite' }).catch(() => null);
+      logError('Invite Reward Leave Handler Failed', err.message, [], { category: 'join' }).catch(() => null);
     });
   });
 }

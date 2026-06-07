@@ -1185,7 +1185,7 @@ async function createTicketFromFlow(interaction, flow, mode) {
 
   logInfo('Ticket Opened', `<@${member.id}> opened a **${flow.type}** ticket`, [
     { name: 'Channel', value: channel.toString(), inline: true },
-  ]).catch(() => null);
+  ], { category: 'ticket' }).catch(() => null);
 
   await sendResponse([
     new ContainerBuilder().setAccentColor(0x57F287).addTextDisplayComponents(
@@ -1308,7 +1308,7 @@ async function closeTicketWithTranscript({ interaction, ticket, reason = 'Closed
     { name: 'Opener', value: `<@${ticket.openerId}>`, inline: true },
     { name: 'Type', value: ticket.ticketType, inline: true },
     { name: 'Transcript', value: transcriptChannel ? `${transcriptChannel}` : 'Unavailable', inline: true },
-  ]).catch(() => null);
+  ], { category: 'ticket' }).catch(() => null);
 
   if (channel?.delete) {
     await channel.delete(`Ticket closed: ${reason}`).catch(() => null);
