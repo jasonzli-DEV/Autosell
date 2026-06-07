@@ -88,7 +88,10 @@ class DonutMinecraftPayer extends EventEmitter {
         resolve(this.bot);
       });
 
-      this.bot.on('messagestr', (message) => this.emit('message', message));
+      this.bot.on('messagestr', (message, position, jsonMsg) => {
+        this.emit('serverMessage', { message, position, jsonMsg });
+        this.emit('message', message);
+      });
       this.bot.on('message', (jsonMsg) => this.emit('rawMessage', jsonMsg));
 
       this.bot.on('error', (err) => {
@@ -211,7 +214,23 @@ class DonutMinecraftPayer extends EventEmitter {
         settled = true;
         clearTimeout(timer);
         this.off('message', onMessage);
+        this.off('serverMessage', onServerMessage);
         fn(value);
+      };
+
+      let replyLogged = false;
+      const onServerMessage = ({ message, position } = {}) => {
+        if (replyLogged) return;
+        replyLogged = true;
+        logInfo(
+          'Invite Reward Minecraft Reply',
+          `${message || '(empty message)'}`,
+          [
+            { name: 'Command', value: `\`${command}\``, inline: false },
+            { name: 'Position', value: `\`${position || 'unknown'}\``, inline: true },
+          ],
+          { category: 'invite' },
+        ).catch(() => null);
       };
 
       const onMessage = (message) => {
@@ -234,6 +253,7 @@ class DonutMinecraftPayer extends EventEmitter {
         finish(reject, new MinecraftPayoutError('No DonutSMP payment confirmation was received.', { type: 'confirmation_timeout' }));
       }, timeoutMs);
 
+      this.on('serverMessage', onServerMessage);
       this.on('message', onMessage);
       bot.chat(command);
     });
