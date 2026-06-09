@@ -373,6 +373,154 @@ async function processInviteRewardClaim(interaction, ign) {
   });
 }
 
+async function handleAdminInviteView(interaction) {
+  if (!isAdmin(interaction)) {
+    return interaction.reply({ embeds: [errorEmbed('You do not have permission to use this command.')], flags: MessageFlags.Ephemeral });
+  }
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const settings = await getSettings();
+  const config = getInviteRewardConfig(settings);
+  const user = interaction.options.getUser('user');
+  const invites = await InviteRewardInvite.find({ guildId: interaction.guildId, inviterId: user.id }).sort({ joinedAt: 1 }).lean();
+  const stats = calculateInviteRewardStats({ invites });
+  const bonusCount = invites.filter(i => i.synthetic).length;
+  const claimableAmount = stats.claimable * config.payoutPerInvite;
+
+  const embed = new EmbedBuilder()
+    .setColor(0x5865F2)
+    .setTitle(`Invite Stats — ${user.username}`)
+    .addFields(
+      { name: 'Total', value: `\`${stats.total}\``, inline: true },
+      { name: 'Left', value: `\`${stats.left}\``, inline: true },
+      { name: 'Rejoin', value: `\`${stats.rejoin}\``, inline: true },
+      { name: 'Fake', value: `\`${stats.fake}\``, inline: true },
+      { name: 'Payable', value: `\`${stats.payable}\``, inline: true },
+      { name: 'Claimable', value: `\`${stats.claimable}\``, inline: true },
+      { name: 'Bonus (Admin)', value: `\`${bonusCount}\``, inline: true },
+      { name: 'Claimable Reward', value: `\`${formatDonutAmount(claimableAmount)}\``, inline: false },
+    )
+    .setDescription(`Minimum to claim: **${config.minimumInvites}** valid payable invites.`);
+
+  return interaction.editReply({ embeds: [embed] });
+}
+
+async function handleAdminInviteAdd(interaction) {
+  if (!isAdmin(interaction)) {
+    return interaction.reply({ embeds: [errorEmbed('You do not have permission to use this command.')], flags: MessageFlags.Ephemeral });
+  }
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const user = interaction.options.getUser('user');
+  const count = interaction.options.getInteger('count');
+
+  const records = Array.from({ length: count }, () => ({
+    guildId: interaction.guildId,
+    inviterId: user.id,
+    inviterTag: user.tag || user.username || null,
+    memberId: randomUUID(),
+    memberTag: 'synthetic',
+    inviteCode: 'admin',
+    joinedAt: new Date(),
+    accountCreatedAt: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000),
+    fake: false,
+    rejoin: false,
+    synthetic: true,
+  }));
+
+  await InviteRewardInvite.insertMany(records);
+
+  await logSuccess(
+    'Admin Invite Add',
+    `<@${interaction.user.id}> added **${count}** bonus invite(s) to <@${user.id}>.`,
+    [{ name: 'Added', value: `${count}`, inline: true }],
+    { category: 'invite' },
+  );
+
+  return interaction.editReply({ embeds: [successEmbed(`Added **${count}** bonus invite(s) to <@${user.id}>.`)] });
+}
+
+async function handleAdminInviteSet(interaction) {
+  if (!isAdmin(interaction)) {
+    return interaction.reply({ embeds: [errorEmbed('You do not have permission to use this command.')], flags: MessageFlags.Ephemeral });
+  }
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const user = interaction.options.getUser('user');
+  const target = interaction.options.getInteger('count');
+
+  const existing = await InviteRewardInvite.find({
+    guildId: interaction.guildId,
+    inviterId: user.id,
+    synthetic: true,
+    claimStatus: 'open',
+  }).lean();
+  const current = existing.length;
+
+  if (target > current) {
+    const toAdd = target - current;
+    const records = Array.from({ length: toAdd }, () => ({
+      guildId: interaction.guildId,
+      inviterId: user.id,
+      inviterTag: user.tag || user.username || null,
+      memberId: randomUUID(),
+      memberTag: 'synthetic',
+      inviteCode: 'admin',
+      joinedAt: new Date(),
+      accountCreatedAt: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000),
+      fake: false,
+      rejoin: false,
+      synthetic: true,
+    }));
+    await InviteRewardInvite.insertMany(records);
+  } else if (target < current) {
+    const ids = existing.slice(0, current - target).map(r => r._id);
+    await InviteRewardInvite.deleteMany({ _id: { $in: ids } });
+  }
+
+  await logSuccess(
+    'Admin Invite Set',
+    `<@${interaction.user.id}> set bonus invites for <@${user.id}> to **${target}**.`,
+    [
+      { name: 'Previous', value: `${current}`, inline: true },
+      { name: 'New', value: `${target}`, inline: true },
+    ],
+    { category: 'invite' },
+  );
+
+  return interaction.editReply({ embeds: [successEmbed(`Set bonus invites for <@${user.id}> to **${target}** (was **${current}**).`)] });
+}
+
+async function handleAdminInviteRemove(interaction) {
+  if (!isAdmin(interaction)) {
+    return interaction.reply({ embeds: [errorEmbed('You do not have permission to use this command.')], flags: MessageFlags.Ephemeral });
+  }
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const user = interaction.options.getUser('user');
+  const count = interaction.options.getInteger('count');
+
+  const existing = await InviteRewardInvite.find({
+    guildId: interaction.guildId,
+    inviterId: user.id,
+    synthetic: true,
+    claimStatus: 'open',
+  }).lean();
+
+  if (existing.length === 0) {
+    return interaction.editReply({ embeds: [errorEmbed(`<@${user.id}> has no bonus invites to remove.`)] });
+  }
+
+  const toRemove = count === null ? existing.length : Math.min(count, existing.length);
+  const ids = existing.slice(0, toRemove).map(r => r._id);
+  await InviteRewardInvite.deleteMany({ _id: { $in: ids } });
+
+  await logSuccess(
+    'Admin Invite Remove',
+    `<@${interaction.user.id}> removed **${toRemove}** bonus invite(s) from <@${user.id}>.`,
+    [{ name: 'Removed', value: `${toRemove}`, inline: true }],
+    { category: 'invite' },
+  );
+
+  return interaction.editReply({ embeds: [successEmbed(`Removed **${toRemove}** bonus invite(s) from <@${user.id}>.`)] });
+}
+
 async function postInviteRewardPanel(interaction) {
   if (!isAdmin(interaction)) {
     return interaction.reply({
@@ -594,6 +742,10 @@ module.exports = {
   handleInviteRewardCheck,
   handleInviteRewardClaimButton,
   handleInviteRewardClaimModal,
+  handleAdminInviteView,
+  handleAdminInviteAdd,
+  handleAdminInviteSet,
+  handleAdminInviteRemove,
   postInviteRewardPanel,
   configureInviteRewards,
   initializeInviteRewardTracking,

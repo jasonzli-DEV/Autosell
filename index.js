@@ -26,6 +26,7 @@ const ticketCommand = require('./src/commands/ticket');
 const giveawayCommand = require('./src/commands/giveaway');
 const setCommand = require('./src/commands/set');
 const lookupCommand = require('./src/commands/lookup');
+const inviteCommand = require('./src/commands/invite');
 const handleButton = require('./src/interactions/button');
 const handleModal = require('./src/interactions/modal');
 const { isStaleInteractionError } = require('./src/lib/interactionErrors');
@@ -69,6 +70,7 @@ const commands = [
   giveawayCommand.data.toJSON(),
   setCommand.data.toJSON(),
   lookupCommand.data.toJSON(),
+  inviteCommand.data.toJSON(),
 ];
 
 const commandMap = {
@@ -81,6 +83,7 @@ const commandMap = {
   giveaway: giveawayCommand,
   set: setCommand,
   lookup: lookupCommand,
+  invite: inviteCommand,
 };
 
 function getInteractionLabel(interaction) {

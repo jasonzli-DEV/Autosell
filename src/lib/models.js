@@ -51,6 +51,7 @@ const inviteRewardInviteSchema = new mongoose.Schema(
     fake: { type: Boolean, default: false },
     rejoin: { type: Boolean, default: false },
     leftAt: { type: Date, default: null },
+    synthetic: { type: Boolean, default: false },
     claimStatus: { type: String, enum: ['open', 'pending', 'paid'], default: 'open' },
     claimLockId: { type: String, default: null },
     claimedAt: { type: Date, default: null },
@@ -62,6 +63,7 @@ const inviteRewardInviteSchema = new mongoose.Schema(
 inviteRewardInviteSchema.index({ guildId: 1, inviterId: 1 });
 inviteRewardInviteSchema.index({ guildId: 1, memberId: 1 });
 inviteRewardInviteSchema.index({ claimLockId: 1 });
+inviteRewardInviteSchema.index({ guildId: 1, inviterId: 1, synthetic: 1 });
 
 const inviteRewardClaimSchema = new mongoose.Schema(
   {
