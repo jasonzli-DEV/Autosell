@@ -383,7 +383,7 @@ async function handleAdminInviteView(interaction) {
   const user = interaction.options.getUser('user');
   const invites = await InviteRewardInvite.find({ guildId: interaction.guildId, inviterId: user.id }).sort({ joinedAt: 1 }).lean();
   const stats = calculateInviteRewardStats({ invites });
-  const bonusCount = invites.filter(i => i.synthetic).length;
+  const bonusCount = invites.filter(i => i.synthetic && i.claimStatus !== 'paid').length;
   const claimableAmount = stats.claimable * config.payoutPerInvite;
 
   const embed = new EmbedBuilder()
@@ -504,7 +504,16 @@ async function handleAdminInviteRemove(interaction) {
   }).lean();
 
   if (existing.length === 0) {
-    return interaction.editReply({ embeds: [errorEmbed(`<@${user.id}> has no bonus invites to remove.`)] });
+    const claimedBonusCount = await InviteRewardInvite.countDocuments({
+      guildId: interaction.guildId,
+      inviterId: user.id,
+      synthetic: true,
+      claimStatus: 'paid',
+    });
+    const msg = claimedBonusCount > 0
+      ? `<@${user.id}> has no removable bonus invites — all **${claimedBonusCount}** bonus invite(s) have already been claimed.`
+      : `<@${user.id}> has no bonus invites to remove.`;
+    return interaction.editReply({ embeds: [errorEmbed(msg)] });
   }
 
   const toRemove = count === null ? existing.length : Math.min(count, existing.length);
