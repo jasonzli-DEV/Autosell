@@ -97,7 +97,7 @@ function buildPayCommand(ign, amount) {
   return `/pay ${`${ign || ''}`.trim()} ${Math.trunc(Number(amount) || 0)}`;
 }
 
-function parsePaymentChatMessage(message) {
+function parsePaymentChatMessage(message, position) {
   const lower = `${message || ''}`.toLowerCase();
   if (!lower) return null;
   if (
@@ -110,6 +110,17 @@ function parsePaymentChatMessage(message) {
     return { type: 'insufficient_balance' };
   }
   if (
+    lower.includes('cannot process') ||
+    lower.includes('unable to process') ||
+    lower.includes('we are sorry') ||
+    lower.includes('we am sorry') ||
+    lower.includes('transaction failed') ||
+    lower.includes('payment failed') ||
+    lower.includes('could not complete')
+  ) {
+    return { type: 'payment_rejected' };
+  }
+  if (
     lower.includes('player not found') ||
     lower.includes('could not find') ||
     lower.includes('never joined') ||
@@ -117,6 +128,9 @@ function parsePaymentChatMessage(message) {
   ) {
     return { type: 'invalid_player' };
   }
+  // Only accept payment confirmations from system messages, not player chat,
+  // to prevent player chat containing "paid" from triggering a false positive.
+  if (position && position !== 'system') return null;
   if (
     lower.includes(' paid ') ||
     lower.startsWith('paid ') ||

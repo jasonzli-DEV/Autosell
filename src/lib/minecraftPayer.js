@@ -215,7 +215,8 @@ class DonutMinecraftPayer extends EventEmitter {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        this.off('message', onMessage);
+        stopReplyLogging();
+        this.off('serverMessage', onPaymentMessage);
         fn(value);
       };
 
@@ -239,8 +240,8 @@ class DonutMinecraftPayer extends EventEmitter {
       };
       const replyLogTimer = setTimeout(stopReplyLogging, PAYMENT_REPLY_LOG_WINDOW_MS);
 
-      const onMessage = (message) => {
-        const parsed = parser(message);
+      const onPaymentMessage = ({ message, position } = {}) => {
+        const parsed = parser(message, position);
         if (!parsed) return;
         if (parsed.type === 'paid') {
           finish(resolve, { ok: true, command, message });
@@ -248,6 +249,10 @@ class DonutMinecraftPayer extends EventEmitter {
         }
         if (parsed.type === 'insufficient_balance') {
           finish(reject, new MinecraftPayoutError('The Minecraft account has insufficient DonutSMP balance.', { type: 'insufficient_balance' }));
+          return;
+        }
+        if (parsed.type === 'payment_rejected') {
+          finish(reject, new MinecraftPayoutError('DonutSMP could not process the payment.', { type: 'payment_rejected' }));
           return;
         }
         if (parsed.type === 'invalid_player') {
@@ -260,7 +265,7 @@ class DonutMinecraftPayer extends EventEmitter {
       }, timeoutMs);
 
       this.on('serverMessage', onServerMessage);
-      this.on('message', onMessage);
+      this.on('serverMessage', onPaymentMessage);
       bot.chat(command);
     });
   }
