@@ -84,6 +84,7 @@ async function startPayment(tx) {
   const receiver = `${receiverIgn || process.env.DONUTSMP_RECEIVER_IGN || ''}`.trim();
 
   const baseline = await fetchDonutStatsWithRetry(ign);
+  const receiverBaseline = await fetchDonutStatsWithRetry(receiver);
 
   await dmUser(userId, new EmbedBuilder()
     .setColor(0x57F287)
@@ -114,14 +115,19 @@ async function startPayment(tx) {
     if (running || !active || active.userId !== userId) return;
     running = true;
     try {
-      const current = await fetchDonutStatsWithRetry(ign);
-      const totalPayment = baseline.money - current.money;
-      lastPaymentTotal = Math.max(0, totalPayment);
+      const [current, receiverCurrent] = await Promise.all([
+        fetchDonutStatsWithRetry(ign),
+        fetchDonutStatsWithRetry(receiver),
+      ]);
+      const senderDrop = baseline.money - current.money;
+      const receiverGain = receiverCurrent.money - receiverBaseline.money;
+      const totalPayment = Math.min(Math.max(0, senderDrop), Math.max(0, receiverGain));
+      lastPaymentTotal = totalPayment;
       checks++;
 
-      verboseLog(`[Queue] Check #${checks} for ${userId}: totalPayment=${totalPayment} required=10000000`);
+      verboseLog(`[Queue] Check #${checks} for ${userId}: senderDrop=${senderDrop} receiverGain=${receiverGain} required=10000000`);
 
-      if (totalPayment >= MIN_PAYMENT) {
+      if (senderDrop >= MIN_PAYMENT && receiverGain >= MIN_PAYMENT) {
         clearTransaction(tx);
         await onPaymentConfirmed(tx, totalPayment);
       }
@@ -144,7 +150,7 @@ async function startPayment(tx) {
       .setTitle('Payment Window Expired')
       .setDescription(
         `The ${timeoutMin}-minute window closed.\n\n` +
-        `Detected: **${formatMoney(Math.max(0, lastPaymentTotal))}** paid (minimum needed: **10m**)\n\n` +
+        `Detected: **${formatMoney(lastPaymentTotal)}** confirmed to receiver (minimum needed: **10m**)\n\n` +
         `If you already paid, contact an admin with your Discord ID: \`${userId}\``,
       ),
     );
