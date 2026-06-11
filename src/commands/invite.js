@@ -43,12 +43,9 @@ module.exports = {
     .addSubcommand(sub =>
       sub
         .setName('remove')
-        .setDescription('Remove bonus invites from a user')
+        .setDescription("Remove a member's invite and prevent them from being credited again")
         .addUserOption(opt =>
-          opt.setName('user').setDescription('The user to remove invites from').setRequired(true),
-        )
-        .addIntegerOption(opt =>
-          opt.setName('count').setDescription('Number of bonus invites to remove (omit to remove all)').setMinValue(1).setRequired(false),
+          opt.setName('member').setDescription('The member whose invite to remove').setRequired(true),
         ),
     ),
 

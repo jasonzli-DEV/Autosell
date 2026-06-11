@@ -397,7 +397,7 @@ async function handleAdminInviteView(interaction) {
   const user = interaction.options.getUser('user');
   const invites = await InviteRewardInvite.find({ guildId: interaction.guildId, inviterId: user.id }).sort({ joinedAt: 1 }).lean();
   const stats = calculateInviteRewardStats({ invites });
-  const bonusCount = invites.filter(i => i.synthetic && i.claimStatus !== 'paid').length;
+  const bonusCount = invites.filter(i => i.synthetic).length;
   const claimableAmount = stats.claimable * config.payoutPerInvite;
 
   const embed = new EmbedBuilder()
@@ -507,41 +507,35 @@ async function handleAdminInviteRemove(interaction) {
     return interaction.reply({ embeds: [errorEmbed('You do not have permission to use this command.')], flags: MessageFlags.Ephemeral });
   }
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const user = interaction.options.getUser('user');
-  const count = interaction.options.getInteger('count');
+  const member = interaction.options.getUser('member');
 
-  const existing = await InviteRewardInvite.find({
+  const invite = await InviteRewardInvite.findOne({
     guildId: interaction.guildId,
-    inviterId: user.id,
-    synthetic: true,
-    claimStatus: 'open',
+    memberId: member.id,
+    leftAt: null,
+    synthetic: false,
   }).lean();
 
-  if (existing.length === 0) {
-    const claimedBonusCount = await InviteRewardInvite.countDocuments({
-      guildId: interaction.guildId,
-      inviterId: user.id,
-      synthetic: true,
-      claimStatus: 'paid',
-    });
-    const msg = claimedBonusCount > 0
-      ? `<@${user.id}> has no removable bonus invites — all **${claimedBonusCount}** bonus invite(s) have already been claimed.`
-      : `<@${user.id}> has no bonus invites to remove.`;
+  if (!invite) {
+    const alreadyRemoved = await InviteRewardInvite.exists({ guildId: interaction.guildId, memberId: member.id, synthetic: false });
+    const msg = alreadyRemoved
+      ? `<@${member.id}>'s invite has already been removed.`
+      : `No invite record found for <@${member.id}>.`;
     return interaction.editReply({ embeds: [errorEmbed(msg)] });
   }
 
-  const toRemove = count === null ? existing.length : Math.min(count, existing.length);
-  const ids = existing.slice(0, toRemove).map(r => r._id);
-  await InviteRewardInvite.deleteMany({ _id: { $in: ids } });
+  await InviteRewardInvite.updateOne({ _id: invite._id }, { $set: { leftAt: new Date() } });
 
   await logSuccess(
     'Admin Invite Remove',
-    `<@${interaction.user.id}> removed **${toRemove}** bonus invite(s) from <@${user.id}>.`,
-    [{ name: 'Removed', value: `${toRemove}`, inline: true }],
+    `<@${interaction.user.id}> removed the invite for <@${member.id}> (credited to <@${invite.inviterId}>).`,
+    [{ name: 'Inviter', value: `<@${invite.inviterId}>`, inline: true }],
     { category: 'invite' },
   );
 
-  return interaction.editReply({ embeds: [successEmbed(`Removed **${toRemove}** bonus invite(s) from <@${user.id}>.`)] });
+  return interaction.editReply({
+    embeds: [successEmbed(`Removed invite for <@${member.id}>. They were credited to <@${invite.inviterId}> and cannot be credited again.`)],
+  });
 }
 
 async function postInviteRewardPanel(interaction) {
