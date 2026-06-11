@@ -43,9 +43,12 @@ module.exports = {
     .addSubcommand(sub =>
       sub
         .setName('remove')
-        .setDescription("Remove a member's invite and prevent them from being credited again")
+        .setDescription("Remove payable invites from a user's count")
         .addUserOption(opt =>
-          opt.setName('member').setDescription('The member whose invite to remove').setRequired(true),
+          opt.setName('user').setDescription('The inviter to remove payable invites from').setRequired(true),
+        )
+        .addIntegerOption(opt =>
+          opt.setName('count').setDescription('Number of payable invites to remove (omit to remove all)').setMinValue(1).setRequired(false),
         ),
     ),
 
