@@ -99,41 +99,31 @@ function snapshotInventory(bot) {
   }));
 }
 
-function isSpawnerItemName(name) {
+function isSpawnerItem(name) {
   return name === 'spawner' || name === 'monster_spawner';
-}
-
-function isSkeletonSpawnerNbt(nbt) {
-  try {
-    const tag = nbt?.value?.BlockEntityTag?.value;
-    if (!tag) return false;
-    // 1.20+ format: SpawnData.entity.id
-    const entityId1 = tag?.SpawnData?.value?.entity?.value?.id?.value;
-    if (entityId1) return entityId1 === 'minecraft:skeleton' || entityId1 === 'skeleton';
-    // Pre-1.20 format: SpawnData.id
-    const entityId2 = tag?.SpawnData?.value?.id?.value;
-    if (entityId2) return entityId2 === 'minecraft:skeleton' || entityId2 === 'skeleton';
-    return false;
-  } catch {
-    return false;
-  }
-}
-
-function isSkeletonSpawner(item) {
-  return isSpawnerItemName(item.name) && isSkeletonSpawnerNbt(item.nbt);
 }
 
 function countSpawnersInShulkerNbt(nbt) {
   try {
-    const items = nbt?.value?.BlockEntityTag?.value?.Items?.value?.value || [];
+    const v = nbt?.value || {};
+
+    // 1.20.5+ format: minecraft:container component holds slot/item pairs
+    const container = v['minecraft:container']?.value?.value;
+    if (Array.isArray(container)) {
+      return container.reduce((sum, entry) => {
+        const slotItem = entry?.value?.item?.value ?? entry?.item?.value ?? {};
+        const id = (slotItem?.id?.value ?? '').replace('minecraft:', '');
+        const count = slotItem?.count?.value ?? slotItem?.Count?.value ?? 0;
+        return sum + (isSpawnerItem(id) ? count : 0);
+      }, 0);
+    }
+
+    // Pre-1.20.5 format: BlockEntityTag.Items list
+    const items = v?.BlockEntityTag?.value?.Items?.value?.value ?? [];
     return items.reduce((sum, slotItem) => {
-      const id = slotItem?.value?.id?.value || '';
-      const count = slotItem?.value?.Count?.value || 0;
-      if (!isSpawnerItemName(id) && !isSpawnerItemName(id.replace('minecraft:', ''))) return sum;
-      // Check the spawner's own tag to confirm it's a skeleton spawner
-      const spawnerTag = slotItem?.value?.tag;
-      if (spawnerTag && !isSkeletonSpawnerNbt(spawnerTag)) return sum;
-      return sum + count;
+      const id = (slotItem?.value?.id?.value ?? '').replace('minecraft:', '');
+      const count = slotItem?.value?.Count?.value ?? slotItem?.value?.count?.value ?? 0;
+      return sum + (isSpawnerItem(id) ? count : 0);
     }, 0);
   } catch {
     return 0;
@@ -143,7 +133,8 @@ function countSpawnersInShulkerNbt(nbt) {
 function countSpawnersInItems(items) {
   let total = 0;
   for (const item of items) {
-    if (isSkeletonSpawner(item)) {
+    // On DonutSMP all spawner items are skeleton spawners — trust the item name.
+    if (isSpawnerItem(item.name)) {
       total += item.count;
     } else if (item.name.endsWith('_shulker_box')) {
       total += countSpawnersInShulkerNbt(item.nbt);
@@ -166,7 +157,7 @@ async function depositIntoEnderchest(bot, ecBlock) {
       for (let slot = window.inventoryStart; slot < window.slots.length; slot++) {
         const item = window.slots[slot];
         if (!item) continue;
-        if (isSpawnerItemName(item.name) || item.name.endsWith('_shulker_box')) {
+        if (isSpawnerItem(item.name) || item.name.endsWith('_shulker_box')) {
           found = true;
           try {
             await bot.clickWindow(slot, 0, 1);
@@ -182,7 +173,7 @@ async function depositIntoEnderchest(bot, ecBlock) {
 
     const remaining = window.slots
       .slice(window.inventoryStart)
-      .filter(item => item && (isSpawnerItemName(item.name) || item.name.endsWith('_shulker_box')))
+      .filter(item => item && (isSpawnerItem(item.name) || item.name.endsWith('_shulker_box')))
       .length;
 
     return { success: remaining === 0, remaining };
@@ -423,9 +414,13 @@ async function onSpawnerDone(session) {
   const bot = requireBot();
   const inventoryAfter = snapshotInventory(bot);
 
+  console.log('[SpawnerSell] Inventory BEFORE:', JSON.stringify(session.inventoryBefore, null, 2));
+  console.log('[SpawnerSell] Inventory AFTER:', JSON.stringify(inventoryAfter, null, 2));
+
   const before = countSpawnersInItems(session.inventoryBefore);
   const after = countSpawnersInItems(inventoryAfter);
   const newSpawners = after - before;
+  console.log(`[SpawnerSell] spawnersBefore=${before} spawnersAfter=${after} new=${newSpawners}`);
 
   if (newSpawners <= 0) {
     session.status = 'awaiting_drop';

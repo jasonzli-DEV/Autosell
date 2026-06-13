@@ -96,6 +96,20 @@ class DonutMinecraftPayer extends EventEmitter {
       });
       this.bot.on('message', (jsonMsg) => this.emit('rawMessage', jsonMsg));
 
+      // Physics is disabled, so mineflayer never sends teleport_confirm.
+      // Without it the server doesn't register the bot at teleported positions,
+      // breaking item pickup. Confirm every incoming position packet manually.
+      this.bot._client.on('packet', (data, meta) => {
+        if (
+          meta?.name !== 'position' &&
+          meta?.name !== 'player_position_and_look' &&
+          meta?.name !== 'synchronize_player_position'
+        ) return;
+        if (typeof data?.teleportId === 'number') {
+          try { this.bot._client.write('teleport_confirm', { teleportId: data.teleportId }); } catch {}
+        }
+      });
+
       this.bot.on('error', (err) => {
         console.error('[InviteRewards] Minecraft payer error:', err.message);
         const trace = formatPacketTraceForLog(packetTrace);
