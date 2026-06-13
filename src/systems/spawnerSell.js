@@ -20,7 +20,8 @@ const spawnerSellDoneCustomId = 'spawner_sell_done';
 const TPA_TIMEOUT_MS = 2 * 60 * 1000;
 const DROP_TIMEOUT_MS = 5 * 60 * 1000;
 const TELEPORT_DISTANCE_THRESHOLD = 5;
-const ENDERCHEST_MAX_DISTANCE = 4;
+const ENDERCHEST_MAX_DISTANCE = 6;
+const CHUNK_LOAD_WAIT_MS = 2000;
 
 // Packet names the server sends when teleporting a player (varies by MC version)
 const TELEPORT_PACKET_NAMES = new Set([
@@ -265,6 +266,16 @@ async function startSpawnerSession(session) {
       clearTimeout(session.tpaTimeoutId);
       session.tpaTimeoutId = null;
       session.tpaCleanup?.();
+
+      // Physics is disabled so the bot's entity position never updates automatically.
+      // Manually patch it so findBlock searches from the correct location.
+      const currentBot = getPayerBot();
+      if (currentBot?.entity?.position) {
+        currentBot.entity.position.x = x;
+        currentBot.entity.position.y = y;
+        currentBot.entity.position.z = z;
+      }
+
       onTeleportDetected(session).catch(err => failSession(session, err.message));
     }
   };
@@ -294,10 +305,13 @@ async function onTeleportDetected(session) {
 
   await dmUser(session.userId, {
     embeds: [
-      infoEmbed('Step 2 — Enderchest Check', 'Teleported! Checking for an enderchest within reach...'),
+      infoEmbed('Step 2 — Enderchest Check', 'Teleported! Waiting for chunks to load...'),
     ],
     components: [],
   });
+
+  // Give the server time to send chunks around the new location before scanning for blocks
+  await sleep(CHUNK_LOAD_WAIT_MS);
 
   await checkEnderchest(session);
 }
