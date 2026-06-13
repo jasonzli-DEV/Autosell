@@ -68,9 +68,34 @@ class DonutMinecraftPayer extends EventEmitter {
       console.log(`[InviteRewards] Connecting Minecraft payer to ${config.host}:${config.port} as ${username}.`);
       this.bot = mineflayer.createBot(botOptions);
 
-      // physics plugin is disabled — lookAt/lookAt-dependent calls (openBlock,
-      // activateBlock) would crash without this stub.
-      if (!this.bot.lookAt) this.bot.lookAt = async () => {};
+      // physics plugin is disabled — its lookAt awaits a physics-tick promise that
+      // never resolves, so activateBlock (called by openBlock) hangs forever before
+      // writing block_place. Override unconditionally: calculate rotation, send a
+      // look packet immediately (version-safe: include both onGround and flags so
+      // the serialiser can pick whichever field the active protocol version uses),
+      // and return without waiting.
+      this.bot.lookAt = async (point) => {
+        const bot = this.bot;
+        if (!point || !bot.entity?.position) return;
+        try {
+          const ey = bot.entity.position.y + (bot.entity.eyeHeight ?? 1.62);
+          const dx = point.x - bot.entity.position.x;
+          const dy = point.y - ey;
+          const dz = point.z - bot.entity.position.z;
+          const yaw = Math.atan2(-dx, -dz);
+          const pitch = Math.atan2(dy, Math.sqrt(dx * dx + dz * dz));
+          bot.entity.yaw = yaw;
+          bot.entity.pitch = pitch;
+          const notchYaw = -yaw * 180 / Math.PI;
+          const notchPitch = -pitch * 180 / Math.PI;
+          bot._client.write('look', {
+            yaw: notchYaw,
+            pitch: notchPitch,
+            onGround: true,                                       // pre-1.21.3
+            flags: { onGround: true, hasHorizontalCollision: false }, // 1.21.3+
+          });
+        } catch {}
+      };
       const packetTrace = attachPacketDiagnostics(this.bot);
 
       const failBeforeSpawn = (err) => {

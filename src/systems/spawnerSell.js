@@ -20,7 +20,7 @@ const spawnerSellDoneCustomId = 'spawner_sell_done';
 const TPA_TIMEOUT_MS = 2 * 60 * 1000;
 const DROP_TIMEOUT_MS = 5 * 60 * 1000;
 const TELEPORT_DISTANCE_THRESHOLD = 5;
-const ENDERCHEST_MAX_DISTANCE = 6;
+const ENDERCHEST_MAX_DISTANCE = 4;
 const CHUNK_LOAD_WAIT_MS = 2000;
 
 // Packet names the server sends when teleporting a player (varies by MC version)
@@ -148,17 +148,37 @@ function countSpawnersInShulkerComponents(components) {
   if (!Array.isArray(components)) return 0;
   try {
     const containerComp = components.find(c => c.type === 'minecraft:container' || c.type === 'container');
-    if (!Array.isArray(containerComp?.data)) return 0;
-    return containerComp.data.reduce((sum, slot) => {
-      const slotItem = slot?.item ?? slot?.value?.item;
+    if (!containerComp) {
+      console.log('[SpawnerSell] shulker component types:', JSON.stringify(components.map(c => c.type)));
+      return 0;
+    }
+    console.log('[SpawnerSell] shulker container data type:', typeof containerComp.data, Array.isArray(containerComp.data) ? 'array' : JSON.stringify(containerComp.data)?.slice(0, 200));
+
+    // data can be a plain array or NBT-wrapped list: { type:'list', value:{ type:'compound', value:[...] } }
+    let slots;
+    if (Array.isArray(containerComp.data)) {
+      slots = containerComp.data;
+    } else {
+      slots = containerComp.data?.value?.value;
+      if (!Array.isArray(slots)) return 0;
+    }
+
+    return slots.reduce((sum, slotEntry) => {
+      // Plain: { slot, item } — NBT: { value: { slot: {value}, item: {value} } }
+      const slotItem = slotEntry?.item ?? slotEntry?.value?.item?.value;
       if (!slotItem) return sum;
-      const id = (slotItem.id ?? slotItem.name ?? '').replace('minecraft:', '');
+      const id = (slotItem.id?.value ?? slotItem.id ?? slotItem.name?.value ?? slotItem.name ?? '').replace('minecraft:', '');
       if (!isSpawnerItem(id)) return sum;
-      const mob = getSpawnerMobType(slotItem.components);
-      if (mob?.toLowerCase() !== 'skeleton') return sum;
-      return sum + (slotItem.count ?? 1);
+      const count = slotItem.count?.value ?? slotItem.Count?.value ?? slotItem.count ?? 1;
+      const itemComponents = Array.isArray(slotItem.components) ? slotItem.components : null;
+      if (itemComponents) {
+        const mob = getSpawnerMobType(itemComponents);
+        if (mob && mob.toLowerCase() !== 'skeleton') return sum;
+      }
+      return sum + count;
     }, 0);
-  } catch {
+  } catch (err) {
+    console.log('[SpawnerSell] shulker parse error:', err.message);
     return 0;
   }
 }
@@ -181,20 +201,7 @@ function findEnderchest(bot) {
   return bot.findBlock({ matching: ecId, maxDistance: ENDERCHEST_MAX_DISTANCE });
 }
 
-async function refreshPosition(bot) {
-  const pos = bot.entity?.position;
-  if (!pos) return;
-  try {
-    // Tell the server our position so block interactions aren't rejected
-    bot._client.write('position', { x: pos.x, y: pos.y, z: pos.z, onGround: true });
-    await sleep(100);
-  } catch {}
-}
-
 async function depositIntoEnderchest(bot, ecBlock) {
-  // Refresh server-side position before interacting (anti-cheat compatibility)
-  await refreshPosition(bot);
-
   let window;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
@@ -203,8 +210,7 @@ async function depositIntoEnderchest(bot, ecBlock) {
     } catch (err) {
       if (attempt === 3) throw err;
       console.warn(`[SpawnerSell] openBlock attempt ${attempt} failed: ${err.message} — retrying`);
-      await refreshPosition(bot);
-      await sleep(1500);
+      await sleep(2000);
     }
   }
 
@@ -351,8 +357,6 @@ async function startSpawnerSession(session) {
         currentBot.entity.position.y = y;
         currentBot.entity.position.z = z;
         if (currentBot.entity) currentBot.entity.onGround = true;
-        // Confirm position to server immediately so block interactions aren't rejected
-        try { currentBot._client.write('position', { x, y, z, onGround: true }); } catch {}
       }
 
       onTeleportDetected(session).catch(err => failSession(session, err.message));
