@@ -93,6 +93,8 @@ function requireBot() {
 function snapshotInventory(bot) {
   return bot.inventory.items().map(item => ({
     name: item.name,
+    displayName: item.displayName,
+    customName: item.customName ?? null,
     slot: item.slot,
     count: item.count,
     nbt: item.nbt,
@@ -414,8 +416,17 @@ async function onSpawnerDone(session) {
   const bot = requireBot();
   const inventoryAfter = snapshotInventory(bot);
 
-  console.log('[SpawnerSell] Inventory BEFORE:', JSON.stringify(session.inventoryBefore, null, 2));
-  console.log('[SpawnerSell] Inventory AFTER:', JSON.stringify(inventoryAfter, null, 2));
+  const bot2 = requireBot();
+  for (const item of bot2.inventory.items()) {
+    if (item.name === 'spawner' || item.name === 'monster_spawner') {
+      console.log('[SpawnerSell] RAW SPAWNER ITEM:');
+      const raw = {};
+      for (const key of Object.keys(item)) {
+        try { raw[key] = item[key]; } catch {}
+      }
+      console.log(JSON.stringify(raw, null, 2));
+    }
+  }
 
   const before = countSpawnersInItems(session.inventoryBefore);
   const after = countSpawnersInItems(inventoryAfter);

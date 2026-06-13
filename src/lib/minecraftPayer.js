@@ -67,6 +67,10 @@ class DonutMinecraftPayer extends EventEmitter {
 
       console.log(`[InviteRewards] Connecting Minecraft payer to ${config.host}:${config.port} as ${username}.`);
       this.bot = mineflayer.createBot(botOptions);
+
+      // physics plugin is disabled — lookAt/lookAt-dependent calls (openBlock,
+      // activateBlock) would crash without this stub.
+      if (!this.bot.lookAt) this.bot.lookAt = async () => {};
       const packetTrace = attachPacketDiagnostics(this.bot);
 
       const failBeforeSpawn = (err) => {
