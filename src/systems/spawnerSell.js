@@ -19,9 +19,15 @@ const spawnerSellDoneCustomId = 'spawner_sell_done';
 
 const TPA_TIMEOUT_MS = 2 * 60 * 1000;
 const DROP_TIMEOUT_MS = 5 * 60 * 1000;
-const TELEPORT_POLL_MS = 500;
 const TELEPORT_DISTANCE_THRESHOLD = 5;
 const ENDERCHEST_MAX_DISTANCE = 4;
+
+// Packet names the server sends when teleporting a player (varies by MC version)
+const TELEPORT_PACKET_NAMES = new Set([
+  'position',
+  'player_position_and_look',
+  'synchronize_player_position',
+]);
 const ITEM_PICKUP_WAIT_MS = 3000;
 const CHEST_DEPOSIT_DELAY_MS = 150;
 const CHEST_DEPOSIT_RETRY_DELAY_MS = 300;
@@ -72,7 +78,7 @@ function clearSession(session) {
   if (!session) return;
   if (session.tpaTimeoutId) clearTimeout(session.tpaTimeoutId);
   if (session.dropTimeoutId) clearTimeout(session.dropTimeoutId);
-  if (session.teleportPollId) clearInterval(session.teleportPollId);
+  session.tpaCleanup?.();
 }
 
 // ── Mineflayer helpers ────────────────────────────────────────────────────────
@@ -199,8 +205,12 @@ async function startSpawnerSession(session) {
   const bot = requireBot();
 
   session.status = 'awaiting_tpa';
-  const initialPos = bot.entity?.position;
-  session.tpaPosition = initialPos ? { x: initialPos.x, y: initialPos.y, z: initialPos.z } : { x: 0, y: 0, z: 0 };
+
+  // Capture baseline position from entity (may be null if physics is disabled)
+  const entityPos = bot.entity?.position;
+  let baseX = entityPos?.x ?? null;
+  let baseY = entityPos?.y ?? null;
+  let baseZ = entityPos?.z ?? null;
 
   bot.chat(`/tpa ${session.ign}`);
 
@@ -228,30 +238,47 @@ async function startSpawnerSession(session) {
 
   logInfo('Spawner Sell TPA Sent', `<@${session.userId}> — /tpa ${session.ign}`, [], { category: 'spawner' }).catch(() => null);
 
-  session.teleportPollId = setInterval(() => {
-    if (!spawnerActive || spawnerActive.userId !== session.userId) {
-      clearInterval(session.teleportPollId);
+  // With physics disabled, bot.entity.position never updates. Instead we watch
+  // for the server's position/teleport packet directly on the raw client socket.
+  let tpaSettled = false;
+
+  const onPositionPacket = (data, meta) => {
+    if (tpaSettled) return;
+    if (!TELEPORT_PACKET_NAMES.has(meta?.name)) return;
+    if (typeof data?.x !== 'number') return;
+
+    const { x, y, z } = data;
+
+    // First packet establishes baseline if entity.position was unavailable
+    if (baseX === null) {
+      baseX = x;
+      baseY = y;
+      baseZ = z;
       return;
     }
-    const bot = getPayerBot();
-    if (!bot?.entity?.position) return;
-    const p = bot.entity.position;
-    const dx = p.x - session.tpaPosition.x;
-    const dy = p.y - session.tpaPosition.y;
-    const dz = p.z - session.tpaPosition.z;
+
+    const dx = x - baseX;
+    const dy = y - baseY;
+    const dz = z - baseZ;
     if (Math.sqrt(dx * dx + dy * dy + dz * dz) > TELEPORT_DISTANCE_THRESHOLD) {
-      clearInterval(session.teleportPollId);
+      tpaSettled = true;
       clearTimeout(session.tpaTimeoutId);
-      session.teleportPollId = null;
       session.tpaTimeoutId = null;
+      session.tpaCleanup?.();
       onTeleportDetected(session).catch(err => failSession(session, err.message));
     }
-  }, TELEPORT_POLL_MS);
+  };
+
+  bot._client.on('packet', onPositionPacket);
+
+  session.tpaCleanup = () => {
+    tpaSettled = true;
+    try { bot._client.removeListener('packet', onPositionPacket); } catch {}
+  };
 
   session.tpaTimeoutId = setTimeout(async () => {
     if (!spawnerActive || spawnerActive.userId !== session.userId) return;
-    clearInterval(session.teleportPollId);
-    session.teleportPollId = null;
+    session.tpaCleanup?.();
 
     await dmUser(session.userId, errorEmbed('TPA timed out — you did not accept within 2 minutes. Removed from queue.'));
     logInfo('Spawner Sell TPA Timeout', `<@${session.userId}> — ${session.ign}`, [], { category: 'spawner' }).catch(() => null);
@@ -560,10 +587,9 @@ async function handleSpawnerSellEnter(interaction) {
     inventoryBefore: null,
     ecBlock: null,
     spawnerCount: 0,
-    tpaPosition: null,
     tpaTimeoutId: null,
     dropTimeoutId: null,
-    teleportPollId: null,
+    tpaCleanup: null,
   };
 
   spawnerQueue.push(session);
