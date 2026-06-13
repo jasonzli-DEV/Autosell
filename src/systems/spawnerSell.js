@@ -98,6 +98,7 @@ function snapshotInventory(bot) {
     slot: item.slot,
     count: item.count,
     nbt: item.nbt,
+    components: item.components ?? null,
   }));
 }
 
@@ -105,27 +106,57 @@ function isSpawnerItem(name) {
   return name === 'spawner' || name === 'monster_spawner';
 }
 
-function countSpawnersInShulkerNbt(nbt) {
+// Reads the first lore line's mob type from the 1.20.5+ components array.
+// DonutSMP stores the mob name (e.g. "Skeleton") as the text of the first
+// extra element on the first lore line.
+function getSpawnerMobType(components) {
+  if (!Array.isArray(components)) return null;
   try {
-    const v = nbt?.value || {};
+    const loreComp = components.find(c => c.type === 'lore');
+    if (!loreComp?.data?.length) return null;
+    const firstLine = loreComp.data[0];
 
-    // 1.20.5+ format: minecraft:container component holds slot/item pairs
-    const container = v['minecraft:container']?.value?.value;
-    if (Array.isArray(container)) {
-      return container.reduce((sum, entry) => {
-        const slotItem = entry?.value?.item?.value ?? entry?.item?.value ?? {};
-        const id = (slotItem?.id?.value ?? '').replace('minecraft:', '');
-        const count = slotItem?.count?.value ?? slotItem?.Count?.value ?? 0;
-        return sum + (isSpawnerItem(id) ? count : 0);
-      }, 0);
+    // NBT-compound wrapped: data[0].value.extra.value.value[0].value.text.value
+    const extras = firstLine?.value?.extra?.value?.value;
+    if (Array.isArray(extras) && extras.length > 0) {
+      const text = extras[0]?.value?.text?.value ?? extras[0]?.text?.value;
+      if (text) return text;
     }
 
-    // Pre-1.20.5 format: BlockEntityTag.Items list
-    const items = v?.BlockEntityTag?.value?.Items?.value?.value ?? [];
-    return items.reduce((sum, slotItem) => {
-      const id = (slotItem?.value?.id?.value ?? '').replace('minecraft:', '');
-      const count = slotItem?.value?.Count?.value ?? slotItem?.value?.count?.value ?? 0;
-      return sum + (isSpawnerItem(id) ? count : 0);
+    // Plain TextComponent: data[0].extra[0].text
+    const extra2 = firstLine?.extra;
+    if (Array.isArray(extra2) && extra2.length > 0) {
+      const text = extra2[0]?.text;
+      if (typeof text === 'string') return text;
+      if (text?.value) return text.value;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function isSkeletonSpawner(item) {
+  if (!isSpawnerItem(item.name)) return false;
+  const mob = getSpawnerMobType(item.components);
+  if (!mob) return false;
+  return mob.toLowerCase() === 'skeleton';
+}
+
+function countSpawnersInShulkerComponents(components) {
+  if (!Array.isArray(components)) return 0;
+  try {
+    const containerComp = components.find(c => c.type === 'minecraft:container' || c.type === 'container');
+    if (!Array.isArray(containerComp?.data)) return 0;
+    return containerComp.data.reduce((sum, slot) => {
+      const slotItem = slot?.item ?? slot?.value?.item;
+      if (!slotItem) return sum;
+      const id = (slotItem.id ?? slotItem.name ?? '').replace('minecraft:', '');
+      if (!isSpawnerItem(id)) return sum;
+      const mob = getSpawnerMobType(slotItem.components);
+      if (mob?.toLowerCase() !== 'skeleton') return sum;
+      return sum + (slotItem.count ?? 1);
     }, 0);
   } catch {
     return 0;
@@ -135,11 +166,10 @@ function countSpawnersInShulkerNbt(nbt) {
 function countSpawnersInItems(items) {
   let total = 0;
   for (const item of items) {
-    // On DonutSMP all spawner items are skeleton spawners — trust the item name.
-    if (isSpawnerItem(item.name)) {
+    if (isSkeletonSpawner(item)) {
       total += item.count;
     } else if (item.name.endsWith('_shulker_box')) {
-      total += countSpawnersInShulkerNbt(item.nbt);
+      total += countSpawnersInShulkerComponents(item.components);
     }
   }
   return total;
@@ -151,8 +181,33 @@ function findEnderchest(bot) {
   return bot.findBlock({ matching: ecId, maxDistance: ENDERCHEST_MAX_DISTANCE });
 }
 
+async function refreshPosition(bot) {
+  const pos = bot.entity?.position;
+  if (!pos) return;
+  try {
+    // Tell the server our position so block interactions aren't rejected
+    bot._client.write('position', { x: pos.x, y: pos.y, z: pos.z, onGround: true });
+    await sleep(100);
+  } catch {}
+}
+
 async function depositIntoEnderchest(bot, ecBlock) {
-  const window = await bot.openBlock(ecBlock);
+  // Refresh server-side position before interacting (anti-cheat compatibility)
+  await refreshPosition(bot);
+
+  let window;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      window = await bot.openBlock(ecBlock);
+      break;
+    } catch (err) {
+      if (attempt === 3) throw err;
+      console.warn(`[SpawnerSell] openBlock attempt ${attempt} failed: ${err.message} — retrying`);
+      await refreshPosition(bot);
+      await sleep(1500);
+    }
+  }
+
   try {
     for (let pass = 0; pass < 3; pass++) {
       let found = false;
@@ -295,6 +350,9 @@ async function startSpawnerSession(session) {
         currentBot.entity.position.x = x;
         currentBot.entity.position.y = y;
         currentBot.entity.position.z = z;
+        if (currentBot.entity) currentBot.entity.onGround = true;
+        // Confirm position to server immediately so block interactions aren't rejected
+        try { currentBot._client.write('position', { x, y, z, onGround: true }); } catch {}
       }
 
       onTeleportDetected(session).catch(err => failSession(session, err.message));
@@ -416,18 +474,6 @@ async function onSpawnerDone(session) {
   const bot = requireBot();
   const inventoryAfter = snapshotInventory(bot);
 
-  const bot2 = requireBot();
-  for (const item of bot2.inventory.items()) {
-    if (item.name === 'spawner' || item.name === 'monster_spawner') {
-      console.log('[SpawnerSell] RAW SPAWNER ITEM:');
-      const raw = {};
-      for (const key of Object.keys(item)) {
-        try { raw[key] = item[key]; } catch {}
-      }
-      console.log(JSON.stringify(raw, null, 2));
-    }
-  }
-
   const before = countSpawnersInItems(session.inventoryBefore);
   const after = countSpawnersInItems(inventoryAfter);
   const newSpawners = after - before;
@@ -472,7 +518,7 @@ async function onSpawnerDone(session) {
 
   const ecBlock = findEnderchest(bot);
   if (!ecBlock) {
-    await failSession(session, 'Enderchest moved out of reach after drop. Contact an admin — your spawners are in the bot\'s inventory.');
+    await failSession(session, 'Enderchest moved out of reach after drop. Contact an admin — your spawners are in the bot\'s inventory.', { skipCleanup: true });
     return;
   }
 
@@ -480,12 +526,12 @@ async function onSpawnerDone(session) {
   try {
     depositResult = await depositIntoEnderchest(bot, ecBlock);
   } catch (err) {
-    await failSession(session, `Could not open enderchest: ${err.message}. Contact an admin.`);
+    await failSession(session, `Could not open enderchest: ${err.message}. Contact an admin.`, { skipCleanup: true });
     return;
   }
 
   if (!depositResult.success) {
-    await failSession(session, `${depositResult.remaining} item(s) could not be moved to the enderchest (may be full). Contact an admin.`);
+    await failSession(session, `${depositResult.remaining} item(s) could not be moved to the enderchest (may be full). Contact an admin.`, { skipCleanup: true });
     return;
   }
 
@@ -581,13 +627,13 @@ async function doCleanup() {
   }
 }
 
-async function failSession(session, reason) {
+async function failSession(session, reason, { skipCleanup = false } = {}) {
   console.error(`[SpawnerSell] Session failed for ${session.userId}: ${reason}`);
   await dmUser(session.userId, errorEmbed(`Something went wrong: ${reason}`));
   logError('Spawner Sell Failed', `<@${session.userId}> (${session.ign})`, [
     { name: 'Reason', value: reason, inline: false },
   ], { category: 'spawner' }).catch(() => null);
-  await doCleanup().catch(() => null);
+  if (!skipCleanup) await doCleanup().catch(() => null);
   clearSession(session);
   spawnerActive = null;
   processSpawnerNext().catch(console.error);
