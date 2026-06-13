@@ -14,6 +14,7 @@ const { setVcClient, updateVoiceChannelName } = require('./src/lib/voiceChannel'
 const { setLoggerClient, logInfo } = require('./src/lib/logger');
 const { setGiveawayClient, resumeActiveGiveaways } = require('./src/systems/giveaway');
 const { initializeInviteRewardTracking } = require('./src/systems/inviteRewards');
+const { setSpawnerClient } = require('./src/systems/spawnerSell');
 const { startMinecraftPayer } = require('./src/lib/minecraftPayer');
 const { handlePanelCategorySelect, handleFlowPaymentMethod, handleFlowSpawnerUnit } = require('./src/systems/tickets');
 const { panelCategoryCustomId, flowPaymentMethodCustomId, flowSpawnerUnitCustomId } = require('./src/lib/autosellConfig');
@@ -59,6 +60,7 @@ setVcClient(client);
 setLoggerClient(client);
 setGiveawayClient(client);
 initializeInviteRewardTracking(client);
+setSpawnerClient(client);
 
 const commands = [
   panelCommand.data.toJSON(),

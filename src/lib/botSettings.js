@@ -18,6 +18,8 @@ const botSettingsSchema = new mongoose.Schema({
   inviteRewardMinimumInvites: { type: Number, default: 5 },
   inviteRewardPanelChannelId: { type: String, default: null },
   inviteRewardPanelMessageId: { type: String, default: null },
+  spawnerSellPanelChannelId: { type: String, default: null },
+  spawnerSellPanelMessageId: { type: String, default: null },
 });
 
 const BotSettings = mongoose.model('BotSettings', botSettingsSchema);

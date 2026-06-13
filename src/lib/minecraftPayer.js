@@ -378,6 +378,10 @@ async function sendDonutPayment(ign, amount, parser) {
   return payer.sendPayment(ign, amount, parser);
 }
 
+function getPayerBot() {
+  return payer.bot;
+}
+
 module.exports = {
   DonutMinecraftPayer,
   MinecraftPayoutError,
@@ -386,4 +390,5 @@ module.exports = {
   formatPacketTraceForLog,
   startMinecraftPayer,
   sendDonutPayment,
+  getPayerBot,
 };

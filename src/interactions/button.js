@@ -43,6 +43,16 @@ const {
   handleInviteRewardCheck,
   handleInviteRewardClaimButton,
 } = require('../systems/inviteRewards');
+const {
+  spawnerSellEnterCustomId,
+  spawnerSellResendTpaCustomId,
+  spawnerSellRecheckEcCustomId,
+  spawnerSellDoneCustomId,
+  handleSpawnerSellEnter,
+  handleSpawnerResendTpa,
+  handleSpawnerRecheckEnderchest,
+  handleSpawnerDoneDropping,
+} = require('../systems/spawnerSell');
 
 function formatRate(pricePerMillionUsd) {
   const per100m = pricePerMillionUsd * 100;
@@ -185,6 +195,28 @@ module.exports = async function handleButton(interaction) {
 
   if (customId === inviteRewardClaimCustomId) {
     await handleInviteRewardClaimButton(interaction);
+    return;
+  }
+
+  // ── Spawner sell buttons ───────────────────────────────────────────────────
+
+  if (customId === spawnerSellEnterCustomId) {
+    await handleSpawnerSellEnter(interaction);
+    return;
+  }
+
+  if (customId === spawnerSellResendTpaCustomId) {
+    await handleSpawnerResendTpa(interaction);
+    return;
+  }
+
+  if (customId === spawnerSellRecheckEcCustomId) {
+    await handleSpawnerRecheckEnderchest(interaction);
+    return;
+  }
+
+  if (customId === spawnerSellDoneCustomId) {
+    await handleSpawnerDoneDropping(interaction);
     return;
   }
 

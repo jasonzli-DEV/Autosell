@@ -10,6 +10,7 @@ const { getLtcUsdPrice } = require('../lib/price');
 const { getWalletBalanceLtc } = require('../lib/ltc');
 const { getPricePerMillionUsd, updateSettings } = require('../lib/botSettings');
 const { postInviteRewardPanel } = require('../systems/inviteRewards');
+const { postSpawnerSellPanel } = require('../systems/spawnerSell');
 
 function getAdminIds() {
   return (process.env.ADMIN_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
@@ -54,6 +55,9 @@ module.exports = {
     )
     .addSubcommand(sub =>
       sub.setName('invite-rewards').setDescription('Post the invite reward claim panel'),
+    )
+    .addSubcommand(sub =>
+      sub.setName('sell-spawners').setDescription('Post the skeleton spawner auto-sell panel'),
     ),
 
   async execute(interaction) {
@@ -94,6 +98,8 @@ module.exports = {
       await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x57F287).setDescription('Panel posted.')] });
     } else if (sub === 'invite-rewards') {
       await postInviteRewardPanel(interaction);
+    } else if (sub === 'sell-spawners') {
+      await postSpawnerSellPanel(interaction);
     }
   },
 };
