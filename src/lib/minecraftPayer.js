@@ -86,12 +86,15 @@ class DonutMinecraftPayer extends EventEmitter {
           const pitch = Math.atan2(dy, Math.sqrt(dx * dx + dz * dz));
           bot.entity.yaw = yaw;
           bot.entity.pitch = pitch;
-          const notchYaw = -yaw * 180 / Math.PI;
-          const notchPitch = -pitch * 180 / Math.PI;
+          // Correct Notchian conversion (from mineflayer/lib/conversions.js):
+          //   toNotchianYaw  = (PI - yaw) * 180/PI   (0=south, 90=west, 180=north …)
+          //   toNotchianPitch = -pitch * 180/PI        (-90=up, 0=horizontal, 90=down)
+          const notchYaw = Math.fround((Math.PI - yaw) * 180 / Math.PI);
+          const notchPitch = Math.fround(-pitch * 180 / Math.PI);
           bot._client.write('look', {
             yaw: notchYaw,
             pitch: notchPitch,
-            onGround: true,                                       // pre-1.21.3
+            onGround: true,                                           // pre-1.21.3
             flags: { onGround: true, hasHorizontalCollision: false }, // 1.21.3+
           });
         } catch {}
