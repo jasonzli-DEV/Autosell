@@ -174,12 +174,14 @@ class DonutMinecraftPayer extends EventEmitter {
           [],
           { category: 'invite' },
         ).catch(() => null);
+        failBeforeSpawn(new Error(`Kicked from DonutSMP: ${text.slice(0, 200)}`));
         this.handleDisconnect('kicked');
       });
 
       this.bot.on('end', (reason) => {
         console.warn('[InviteRewards] Minecraft payer disconnected:', reason || 'ended');
         logInfo('Invite Reward Minecraft Disconnected', `${reason || 'ended'}`, [], { category: 'invite' }).catch(() => null);
+        failBeforeSpawn(new Error(`Connection ended before spawn: ${reason || 'ended'}`));
         this.handleDisconnect(reason || 'ended');
       });
     }).finally(() => {
