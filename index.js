@@ -194,10 +194,28 @@ client.on('interactionCreate', async (interaction) => {
 (async () => {
   try {
     await connectDb();
+  } catch (err) {
+    console.error('Fatal error during DB connect:', err);
+    process.exit(1);
+  }
+
+  try {
     await startMinecraftPayer();
+  } catch (err) {
+    console.warn(`[Minecraft] Could not connect to DonutSMP on startup: ${err.message}`);
+    console.warn('[Minecraft] Spawner trades and invite reward payouts will be unavailable until reconnected.');
+    logInfo(
+      'Minecraft Offline at Startup',
+      `Failed to connect to DonutSMP: ${err.message}\n\nSpawner trades and invite reward payouts will be unavailable until the bot reconnects.`,
+      [],
+      { category: 'invite' },
+    ).catch(() => null);
+  }
+
+  try {
     await client.login(process.env.DISCORD_TOKEN);
   } catch (err) {
-    console.error('Fatal error:', err);
+    console.error('Fatal error during Discord login:', err);
     process.exit(1);
   }
 })();
