@@ -143,44 +143,19 @@ class DonutMinecraftPayer extends EventEmitter {
       });
 
       this.bot.on('error', (err) => {
-        console.error('[InviteRewards] Minecraft payer error:', err.message);
-        const trace = formatPacketTraceForLog(packetTrace);
-        logError(
-          'Invite Reward Minecraft Error',
-          `${err.message}\n\nLast packets:\n\`\`\`\n${trace}\n\`\`\``,
-          [],
-          { category: 'invite' },
-        ).catch(() => null);
+        console.warn('[InviteRewards] Minecraft payer error:', err.message);
         failBeforeSpawn(err);
       });
 
       this.bot.on('kicked', (reason) => {
         const text = typeof reason === 'string' ? reason : JSON.stringify(reason);
-        console.warn('[InviteRewards] Minecraft payer kicked:', text);
-        const trace = formatPacketTraceForLog(packetTrace);
-        console.warn(`[InviteRewards] Packet trace before kick:\n${trace}`);
-        logError(
-          'Invite Reward Minecraft Kicked',
-          [
-            `Reason: ${text.slice(0, 500)}`,
-            `Auth cache profile: \`${username}\``,
-            `Minecraft username: \`${this.bot?.username || this.bot?.player?.username || 'unknown'}\``,
-            '',
-            'Last packets:',
-            '```',
-            trace.slice(0, 2800),
-            '```',
-          ].join('\n'),
-          [],
-          { category: 'invite' },
-        ).catch(() => null);
+        console.warn('[InviteRewards] Minecraft payer kicked:', text.slice(0, 200));
         failBeforeSpawn(new Error(`Kicked from DonutSMP: ${text.slice(0, 200)}`));
         this.handleDisconnect('kicked');
       });
 
       this.bot.on('end', (reason) => {
         console.warn('[InviteRewards] Minecraft payer disconnected:', reason || 'ended');
-        logInfo('Invite Reward Minecraft Disconnected', `${reason || 'ended'}`, [], { category: 'invite' }).catch(() => null);
         failBeforeSpawn(new Error(`Connection ended before spawn: ${reason || 'ended'}`));
         this.handleDisconnect(reason || 'ended');
       });
@@ -226,8 +201,7 @@ class DonutMinecraftPayer extends EventEmitter {
       try {
         await this.connect();
       } catch (err) {
-        console.error('[InviteRewards] Minecraft reconnect failed:', err.message);
-        logError('Invite Reward Minecraft Reconnect Failed', err.message, [], { category: 'invite' }).catch(() => null);
+        console.warn('[InviteRewards] Minecraft reconnect failed:', err.message);
         this.scheduleReconnect();
       }
     }, delay);
