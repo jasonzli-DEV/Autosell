@@ -28,6 +28,9 @@ const CHEST_DEPOSIT_DELAY_MS = 150;
 const CHEST_DEPOSIT_RETRY_DELAY_MS = 300;
 // Time for our rotation packet to flush before we interact with a block.
 const POSITION_SETTLE_MS = 200;
+// After a trade, /rtp the bot away from the user, retrying until it actually moves.
+const RTP_RETRY_INTERVAL_MS = 5000;
+const RTP_MAX_ATTEMPTS = 12; // safety cap (~60s) so a broken /rtp can't loop forever
 
 const spawnerQueue = [];
 let spawnerActive = null;
@@ -649,12 +652,29 @@ async function payUser(session) {
   processSpawnerNext().catch(console.error);
 }
 
+// Sends /rtp east every RTP_RETRY_INTERVAL_MS until the bot's position has moved
+// from where it started (the teleport landed), or the safety cap is hit. /rtp can
+// fail silently (cooldown), so we confirm by the position change rather than assuming.
+async function relocateUntilMoved(bot, { intervalMs = RTP_RETRY_INTERVAL_MS, maxAttempts = RTP_MAX_ATTEMPTS } = {}) {
+  const start = bot.entity?.position?.clone() ?? null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    bot.chat('/rtp east');
+    await sleep(intervalMs);
+    const pos = bot.entity?.position;
+    if (!start || (pos && pos.distanceTo(start) > TELEPORT_DISTANCE_THRESHOLD)) {
+      console.log(`[SpawnerSell] /rtp moved the bot after ${attempt} attempt(s)`);
+      return true;
+    }
+  }
+  console.warn(`[SpawnerSell] /rtp did not move the bot after ${maxAttempts} attempts`);
+  return false;
+}
+
 async function doCleanup() {
   const bot = getPayerBot();
-  if (!bot) return;
+  if (!bot || !isPayerConnected()) return;
   try {
-    bot.chat('/rtp east');
-    await sleep(3000);
+    await relocateUntilMoved(bot);
     await dropBotInventory(bot);
   } catch (err) {
     console.error('[SpawnerSell] Cleanup error:', err.message);
@@ -858,6 +878,7 @@ async function postSpawnerSellPanel(interaction) {
 
 module.exports = {
   depositIntoEnderchest,
+  relocateUntilMoved,
   raycastBlockFace,
   FACE_VECTORS,
   spawnerSellEnterCustomId,
