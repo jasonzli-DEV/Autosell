@@ -112,7 +112,7 @@ class DonutMinecraftPayer extends EventEmitter {
           });
         } catch {}
       };
-      const packetTrace = attachPacketDiagnostics(this.bot);
+      this.packetTrace = attachPacketDiagnostics(this.bot);
 
       const failBeforeSpawn = (err) => {
         if (this.connected) return;
@@ -449,6 +449,10 @@ function getPayerBot() {
   return payer.bot;
 }
 
+function getPacketTrace() {
+  return payer.packetTrace || [];
+}
+
 module.exports = {
   DonutMinecraftPayer,
   MinecraftPayoutError,
@@ -456,6 +460,7 @@ module.exports = {
   buildPositionLookPacket,
   getMinecraftAuthProfile,
   formatPacketTraceForLog,
+  getPacketTrace,
   startMinecraftPayer,
   sendDonutPayment,
   getPayerBot,

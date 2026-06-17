@@ -9,7 +9,7 @@ const { getSettings, updateSettings } = require('../lib/botSettings');
 const { getUserSettings } = require('../lib/userSettings');
 const { getLtcUsdPrice } = require('../lib/price');
 const { sendLtc } = require('../lib/ltc');
-const { getPayerBot } = require('../lib/minecraftPayer');
+const { getPayerBot, getPacketTrace, formatPacketTraceForLog } = require('../lib/minecraftPayer');
 const { logInfo, logSuccess, logError } = require('../lib/logger');
 
 const spawnerSellEnterCustomId = 'spawner_sell_enter';
@@ -211,15 +211,30 @@ async function depositIntoEnderchest(bot, ecBlock) {
   const ecCenter = ecBlock.position.offset(0.5, 0.5, 0.5);
   let window;
   for (let attempt = 1; attempt <= 3; attempt++) {
+    // Evidence gathering: record which clientbound packets arrive in the window
+    // after we send the interaction, so we can see whether the server responds at all.
+    const received = [];
+    const onPacket = (data, meta) => { if (meta?.name) received.push(meta.name); };
+    bot._client.on('packet', onPacket);
     try {
       bot.sendServerPosition?.(ecCenter);
       await sleep(POSITION_SETTLE_MS);
+      console.log(
+        `[SpawnerSell] openBlock attempt ${attempt}: block=${ecBlock.name}@${ecBlock.position} ` +
+        `botPos=${bot.entity?.position} held=${bot.heldItem?.name ?? 'empty'} ` +
+        `quickBarSlot=${bot.quickBarSlot ?? '?'} dist=${bot.entity?.position?.distanceTo?.(ecCenter)?.toFixed?.(2)}`,
+      );
       window = await bot.openBlock(ecBlock);
       break;
     } catch (err) {
+      const counts = received.reduce((m, n) => { m[n] = (m[n] || 0) + 1; return m; }, {});
+      console.warn(`[SpawnerSell] openBlock attempt ${attempt} failed: ${err.message}`);
+      console.warn(`[SpawnerSell] clientbound packets during attempt: ${JSON.stringify(counts)}`);
+      console.warn('[SpawnerSell] recent packet trace:\n' + formatPacketTraceForLog(getPacketTrace().slice(-25)));
       if (attempt === 3) throw err;
-      console.warn(`[SpawnerSell] openBlock attempt ${attempt} failed: ${err.message} — retrying`);
       await sleep(2000);
+    } finally {
+      bot._client.removeListener('packet', onPacket);
     }
   }
 
