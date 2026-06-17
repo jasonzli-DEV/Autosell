@@ -32,6 +32,8 @@ const TELEPORT_PACKET_NAMES = new Set([
 const ITEM_PICKUP_WAIT_MS = 3000;
 const CHEST_DEPOSIT_DELAY_MS = 150;
 const CHEST_DEPOSIT_RETRY_DELAY_MS = 300;
+// Time for the server to register our position packet before we interact with a block.
+const POSITION_SETTLE_MS = 200;
 
 const spawnerQueue = [];
 let spawnerActive = null;
@@ -202,9 +204,16 @@ function findEnderchest(bot) {
 }
 
 async function depositIntoEnderchest(bot, ecBlock) {
+  // Physics is disabled, so the bot never sends a serverbound position packet on its
+  // own. Without one the server has no confirmed client position and silently ignores
+  // the block_place interaction — windowOpen never fires. Tell the server where we
+  // stand (on the ground, looking at the chest) before each open attempt.
+  const ecCenter = ecBlock.position.offset(0.5, 0.5, 0.5);
   let window;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
+      bot.sendServerPosition?.(ecCenter);
+      await sleep(POSITION_SETTLE_MS);
       window = await bot.openBlock(ecBlock);
       break;
     } catch (err) {

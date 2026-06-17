@@ -71,29 +71,42 @@ class DonutMinecraftPayer extends EventEmitter {
       // physics plugin is disabled — its lookAt awaits a physics-tick promise that
       // never resolves, so activateBlock (called by openBlock) hangs forever before
       // writing block_place. Override unconditionally: calculate rotation, send a
-      // look packet immediately (version-safe: include both onGround and flags so
-      // the serialiser can pick whichever field the active protocol version uses),
-      // and return without waiting.
+      // look packet immediately, and return without waiting.
       this.bot.lookAt = async (point) => {
         const bot = this.bot;
         if (!point || !bot.entity?.position) return;
         try {
-          const ey = bot.entity.position.y + (bot.entity.eyeHeight ?? 1.62);
-          const dx = point.x - bot.entity.position.x;
-          const dy = point.y - ey;
-          const dz = point.z - bot.entity.position.z;
-          const yaw = Math.atan2(-dx, -dz);
-          const pitch = Math.atan2(dy, Math.sqrt(dx * dx + dz * dz));
-          bot.entity.yaw = yaw;
-          bot.entity.pitch = pitch;
-          // Correct Notchian conversion (from mineflayer/lib/conversions.js):
-          //   toNotchianYaw  = (PI - yaw) * 180/PI   (0=south, 90=west, 180=north …)
-          //   toNotchianPitch = -pitch * 180/PI        (-90=up, 0=horizontal, 90=down)
-          const notchYaw = Math.fround((Math.PI - yaw) * 180 / Math.PI);
-          const notchPitch = Math.fround(-pitch * 180 / Math.PI);
+          const packet = buildPositionLookPacket(bot.entity, point);
+          bot.entity.yaw = packet._yaw;
+          bot.entity.pitch = packet._pitch;
           bot._client.write('look', {
-            yaw: notchYaw,
-            pitch: notchPitch,
+            yaw: packet.yaw,
+            pitch: packet.pitch,
+            onGround: true,                                           // pre-1.21.3
+            flags: { onGround: true, hasHorizontalCollision: false }, // 1.21.3+
+          });
+        } catch {}
+      };
+
+      // Physics is disabled, so the bot never sends a serverbound position packet.
+      // Without one the server has no confirmed client position and silently drops
+      // block interactions (e.g. opening an enderchest never fires windowOpen). Send
+      // a position_look establishing where we stand, on the ground, optionally aimed
+      // at a target block, before interacting. Version-safe: include both the legacy
+      // onGround boolean and the 1.21.3+ flags object.
+      this.bot.sendServerPosition = (lookAtPoint = null) => {
+        const bot = this.bot;
+        if (!bot?.entity?.position) return;
+        try {
+          const packet = buildPositionLookPacket(bot.entity, lookAtPoint);
+          bot.entity.yaw = packet._yaw;
+          bot.entity.pitch = packet._pitch;
+          bot._client.write('position_look', {
+            x: packet.x,
+            y: packet.y,
+            z: packet.z,
+            yaw: packet.yaw,
+            pitch: packet.pitch,
             onGround: true,                                           // pre-1.21.3
             flags: { onGround: true, hasHorizontalCollision: false }, // 1.21.3+
           });
@@ -303,6 +316,38 @@ function getMinecraftVersion(config, mineflayer) {
   return mineflayer?.latestSupportedVersion || '1.21.11';
 }
 
+// Builds the serverbound position/look fields for a physics-disabled bot.
+// Returns notch-converted yaw/pitch (the protocol units) plus the raw radian
+// values (_yaw/_pitch) so callers can keep bot.entity rotation in sync.
+//   toNotchianYaw  = (PI - yaw) * 180/PI    (0=south, 90=west, 180=north …)
+//   toNotchianPitch = -pitch * 180/PI        (-90=up, 0=horizontal, 90=down)
+function buildPositionLookPacket(entity, lookAtPoint = null) {
+  const pos = entity?.position ?? { x: 0, y: 0, z: 0 };
+  let yaw = entity?.yaw ?? 0;
+  let pitch = entity?.pitch ?? 0;
+
+  if (lookAtPoint) {
+    const ey = pos.y + (entity?.eyeHeight ?? 1.62);
+    const dx = lookAtPoint.x - pos.x;
+    const dy = lookAtPoint.y - ey;
+    const dz = lookAtPoint.z - pos.z;
+    yaw = Math.atan2(-dx, -dz);
+    pitch = Math.atan2(dy, Math.sqrt(dx * dx + dz * dz));
+  }
+
+  return {
+    x: pos.x,
+    y: pos.y,
+    z: pos.z,
+    yaw: Math.fround((Math.PI - yaw) * 180 / Math.PI),
+    pitch: Math.fround(-pitch * 180 / Math.PI),
+    onGround: true,
+    flags: { onGround: true, hasHorizontalCollision: false },
+    _yaw: yaw,
+    _pitch: pitch,
+  };
+}
+
 function buildMinecraftBotOptions({ config, mineflayer }) {
   return {
     host: config.host,
@@ -408,6 +453,7 @@ module.exports = {
   DonutMinecraftPayer,
   MinecraftPayoutError,
   buildMinecraftBotOptions,
+  buildPositionLookPacket,
   getMinecraftAuthProfile,
   formatPacketTraceForLog,
   startMinecraftPayer,
