@@ -23,17 +23,10 @@ const DROP_TIMEOUT_MS = 5 * 60 * 1000;
 const TELEPORT_DISTANCE_THRESHOLD = 5;
 const ENDERCHEST_MAX_DISTANCE = 4;
 const CHUNK_LOAD_WAIT_MS = 2000;
-
-// Packet names the server sends when teleporting a player (varies by MC version)
-const TELEPORT_PACKET_NAMES = new Set([
-  'position',
-  'player_position_and_look',
-  'synchronize_player_position',
-]);
 const ITEM_PICKUP_WAIT_MS = 3000;
 const CHEST_DEPOSIT_DELAY_MS = 150;
 const CHEST_DEPOSIT_RETRY_DELAY_MS = 300;
-// Time for the server to register our position packet before we interact with a block.
+// Time for our rotation packet to flush before we interact with a block.
 const POSITION_SETTLE_MS = 200;
 
 const spawnerQueue = [];
@@ -245,7 +238,9 @@ async function depositIntoEnderchest(bot, ecBlock) {
     const onPacket = (data, meta) => { if (meta?.name) received.push(meta.name); };
     bot._client.on('packet', onPacket);
     try {
-      bot.sendServerPosition?.(ecCenter);
+      // Face the chest so our rotation matches the interaction we send (Grim checks
+      // this). force=true rotates instantly rather than over several physics ticks.
+      await bot.lookAt(ecCenter, true);
       await sleep(POSITION_SETTLE_MS);
 
       // mineflayer's activateBlock hardcodes the top face with a centre cursor, which
@@ -349,11 +344,9 @@ async function startSpawnerSession(session) {
 
   session.status = 'awaiting_tpa';
 
-  // Capture baseline position from entity (may be null if physics is disabled)
-  const entityPos = bot.entity?.position;
-  let baseX = entityPos?.x ?? null;
-  let baseY = entityPos?.y ?? null;
-  let baseZ = entityPos?.z ?? null;
+  // Physics is enabled, so bot.entity.position is kept in sync natively. Capture the
+  // baseline so we can detect the jump when the user accepts the TPA.
+  const base = bot.entity?.position?.clone() ?? null;
 
   bot.chat(`/tpa ${session.ign}`);
 
@@ -381,53 +374,30 @@ async function startSpawnerSession(session) {
 
   logInfo('Spawner Sell TPA Sent', `<@${session.userId}> — /tpa ${session.ign}`, [], { category: 'spawner' }).catch(() => null);
 
-  // With physics disabled, bot.entity.position never updates. Instead we watch
-  // for the server's position/teleport packet directly on the raw client socket.
+  // The server teleports the bot when the user runs /tpaccept. mineflayer emits
+  // 'forcedMove' on every server-side reposition; the first one that moves us far
+  // from the baseline is the accepted teleport.
   let tpaSettled = false;
 
-  const onPositionPacket = (data, meta) => {
+  const onForcedMove = () => {
     if (tpaSettled) return;
-    if (!TELEPORT_PACKET_NAMES.has(meta?.name)) return;
-    if (typeof data?.x !== 'number') return;
+    const pos = bot.entity?.position;
+    if (!pos) return;
+    if (base && pos.distanceTo(base) <= TELEPORT_DISTANCE_THRESHOLD) return;
 
-    const { x, y, z } = data;
+    tpaSettled = true;
+    clearTimeout(session.tpaTimeoutId);
+    session.tpaTimeoutId = null;
+    session.tpaCleanup?.();
 
-    // First packet establishes baseline if entity.position was unavailable
-    if (baseX === null) {
-      baseX = x;
-      baseY = y;
-      baseZ = z;
-      return;
-    }
-
-    const dx = x - baseX;
-    const dy = y - baseY;
-    const dz = z - baseZ;
-    if (Math.sqrt(dx * dx + dy * dy + dz * dz) > TELEPORT_DISTANCE_THRESHOLD) {
-      tpaSettled = true;
-      clearTimeout(session.tpaTimeoutId);
-      session.tpaTimeoutId = null;
-      session.tpaCleanup?.();
-
-      // Physics is disabled so the bot's entity position never updates automatically.
-      // Manually patch it so findBlock searches from the correct location.
-      const currentBot = getPayerBot();
-      if (currentBot?.entity?.position) {
-        currentBot.entity.position.x = x;
-        currentBot.entity.position.y = y;
-        currentBot.entity.position.z = z;
-        if (currentBot.entity) currentBot.entity.onGround = true;
-      }
-
-      onTeleportDetected(session).catch(err => failSession(session, err.message));
-    }
+    onTeleportDetected(session).catch(err => failSession(session, err.message));
   };
 
-  bot._client.on('packet', onPositionPacket);
+  bot.on('forcedMove', onForcedMove);
 
   session.tpaCleanup = () => {
     tpaSettled = true;
-    try { bot._client.removeListener('packet', onPositionPacket); } catch {}
+    try { bot.removeListener('forcedMove', onForcedMove); } catch {}
   };
 
   session.tpaTimeoutId = setTimeout(async () => {

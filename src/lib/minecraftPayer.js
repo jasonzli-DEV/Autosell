@@ -68,7 +68,6 @@ class DonutMinecraftPayer extends EventEmitter {
       console.log(`[InviteRewards] Connecting Minecraft payer to ${config.host}:${config.port} as ${username}.`);
       this.bot = mineflayer.createBot(botOptions);
 
-      installInteractionHelpers(this.bot);
       this.packetTrace = attachPacketDiagnostics(this.bot);
 
       const failBeforeSpawn = (err) => {
@@ -97,20 +96,6 @@ class DonutMinecraftPayer extends EventEmitter {
         this.emit('message', message);
       });
       this.bot.on('message', (jsonMsg) => this.emit('rawMessage', jsonMsg));
-
-      // Physics is disabled, so mineflayer never sends teleport_confirm.
-      // Without it the server doesn't register the bot at teleported positions,
-      // breaking item pickup. Confirm every incoming position packet manually.
-      this.bot._client.on('packet', (data, meta) => {
-        if (
-          meta?.name !== 'position' &&
-          meta?.name !== 'player_position_and_look' &&
-          meta?.name !== 'synchronize_player_position'
-        ) return;
-        if (typeof data?.teleportId === 'number') {
-          try { this.bot._client.write('teleport_confirm', { teleportId: data.teleportId }); } catch {}
-        }
-      });
 
       this.bot.on('error', (err) => {
         console.warn('[InviteRewards] Minecraft payer error:', err.message);
@@ -273,85 +258,6 @@ function getMinecraftVersion(config, mineflayer) {
   return mineflayer?.latestSupportedVersion || '1.21.11';
 }
 
-// Builds the serverbound position/look fields for a physics-disabled bot.
-// Returns notch-converted yaw/pitch (the protocol units) plus the raw radian
-// values (_yaw/_pitch) so callers can keep bot.entity rotation in sync.
-//   toNotchianYaw  = (PI - yaw) * 180/PI    (0=south, 90=west, 180=north …)
-//   toNotchianPitch = -pitch * 180/PI        (-90=up, 0=horizontal, 90=down)
-function buildPositionLookPacket(entity, lookAtPoint = null) {
-  const pos = entity?.position ?? { x: 0, y: 0, z: 0 };
-  let yaw = entity?.yaw ?? 0;
-  let pitch = entity?.pitch ?? 0;
-
-  if (lookAtPoint) {
-    const ey = pos.y + (entity?.eyeHeight ?? 1.62);
-    const dx = lookAtPoint.x - pos.x;
-    const dy = lookAtPoint.y - ey;
-    const dz = lookAtPoint.z - pos.z;
-    yaw = Math.atan2(-dx, -dz);
-    pitch = Math.atan2(dy, Math.sqrt(dx * dx + dz * dz));
-  }
-
-  return {
-    x: pos.x,
-    y: pos.y,
-    z: pos.z,
-    yaw: Math.fround((Math.PI - yaw) * 180 / Math.PI),
-    pitch: Math.fround(-pitch * 180 / Math.PI),
-    onGround: true,
-    flags: { onGround: true, hasHorizontalCollision: false },
-    _yaw: yaw,
-    _pitch: pitch,
-  };
-}
-
-// Installs the interaction helpers a physics-disabled bot needs. With the physics
-// plugin off the bot never ticks, so two things break that these helpers replace:
-//   1. lookAt() awaits a physics-tick promise that never resolves, hanging
-//      activateBlock (and therefore openBlock) before it can write block_place.
-//      We override it to compute rotation and write a `look` packet immediately.
-//   2. The bot never sends a serverbound position packet, so the server has no
-//      confirmed client position and silently drops block interactions. We expose
-//      sendServerPosition() to push a position_look before interacting.
-// Both packets are version-safe: they include the legacy onGround boolean and the
-// 1.21.3+ flags object so the serialiser can use whichever the protocol expects.
-function installInteractionHelpers(bot) {
-  bot.lookAt = async (point) => {
-    if (!point || !bot.entity?.position) return;
-    try {
-      const packet = buildPositionLookPacket(bot.entity, point);
-      bot.entity.yaw = packet._yaw;
-      bot.entity.pitch = packet._pitch;
-      bot._client.write('look', {
-        yaw: packet.yaw,
-        pitch: packet.pitch,
-        onGround: true,
-        flags: { onGround: true, hasHorizontalCollision: false },
-      });
-    } catch {}
-  };
-
-  bot.sendServerPosition = (lookAtPoint = null) => {
-    if (!bot.entity?.position) return;
-    try {
-      const packet = buildPositionLookPacket(bot.entity, lookAtPoint);
-      bot.entity.yaw = packet._yaw;
-      bot.entity.pitch = packet._pitch;
-      bot._client.write('position_look', {
-        x: packet.x,
-        y: packet.y,
-        z: packet.z,
-        yaw: packet.yaw,
-        pitch: packet.pitch,
-        onGround: true,
-        flags: { onGround: true, hasHorizontalCollision: false },
-      });
-    } catch {}
-  };
-
-  return bot;
-}
-
 function buildMinecraftBotOptions({ config, mineflayer }) {
   return {
     host: config.host,
@@ -361,7 +267,12 @@ function buildMinecraftBotOptions({ config, mineflayer }) {
     profilesFolder: config.profilesFolder,
     version: getMinecraftVersion(config, mineflayer),
     hideErrors: true,
-    plugins: { physics: false },
+    // Physics stays ENABLED: the spawner-sell flow teleports the bot, picks up items,
+    // and opens an enderchest. Anti-cheat (Grim on DonutSMP) verifies players via a
+    // movement-prediction engine, so a physics-disabled bot — which never simulates
+    // server knockback/gravity or sends continuous position packets — has its block
+    // interactions silently rejected. Physics also handles teleport_confirm, position
+    // sync, and lookAt natively, which is everything the old manual workarounds did.
   };
 }
 
@@ -461,8 +372,6 @@ module.exports = {
   DonutMinecraftPayer,
   MinecraftPayoutError,
   buildMinecraftBotOptions,
-  buildPositionLookPacket,
-  installInteractionHelpers,
   getMinecraftAuthProfile,
   formatPacketTraceForLog,
   getPacketTrace,

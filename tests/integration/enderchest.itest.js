@@ -1,8 +1,8 @@
 // Integration test, modelled on PrismarineJS/mineflayer's own server tests: it
 // downloads a real vanilla server, boots it locally (offline mode, flat world),
-// connects a *physics-disabled* bot configured exactly like the production payer,
-// places an enderchest next to it, and verifies the bot can open it through the
-// raycast face/cursor path in src/systems/spawnerSell.js.
+// connects a bot (physics enabled, like the production payer), places an enderchest
+// next to it, and verifies the bot can open it through the raycast face/cursor path
+// in src/systems/spawnerSell.js.
 //
 // NOTE: a vanilla server does NOT run Grim/anticheat, so this cannot reproduce the
 // DonutSMP-specific rejection. It proves our interaction stack (lookAt override,
@@ -21,10 +21,8 @@ const fs = require('node:fs');
 const { once } = require('node:events');
 
 const mineflayer = require('mineflayer');
-const { Vec3 } = require('vec3');
 const { WrapServer, download } = require('minecraft-wrap');
 
-const { installInteractionHelpers } = require('../../src/lib/minecraftPayer');
 const { depositIntoEnderchest } = require('../../src/systems/spawnerSell');
 
 const VERSION = process.env.MC_TEST_VERSION || '1.21.4';
@@ -43,24 +41,7 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-// Mirror the production survival kit for a physics-disabled bot: keep entity.position
-// in sync from server position packets and confirm teleports (otherwise the server
-// never registers where we are). In production this lives in the payer's connect().
-function trackPositionWithoutPhysics(bot) {
-  const NAMES = new Set(['position', 'player_position_and_look', 'synchronize_player_position']);
-  bot._client.on('packet', (data, meta) => {
-    if (!NAMES.has(meta?.name) || typeof data?.x !== 'number') return;
-    if (!bot.entity) return;
-    if (!bot.entity.position) bot.entity.position = new Vec3(data.x, data.y, data.z);
-    else { bot.entity.position.x = data.x; bot.entity.position.y = data.y; bot.entity.position.z = data.z; }
-    bot.entity.onGround = true;
-    if (typeof data.teleportId === 'number') {
-      try { bot._client.write('teleport_confirm', { teleportId: data.teleportId }); } catch {}
-    }
-  });
-}
-
-test('physics-disabled bot opens an enderchest via the raycast path on a real server', { timeout: 600_000 }, async (t) => {
+test('bot opens an enderchest via the raycast path on a real server', { timeout: 600_000 }, async (t) => {
   if (process.env.SKIP_INTEGRATION === '1') return t.skip('SKIP_INTEGRATION=1');
 
   fs.mkdirSync(WORK_DIR, { recursive: true });
@@ -96,10 +77,8 @@ test('physics-disabled bot opens an enderchest via the raycast path on a real se
       username: 'EnderTestBot',
       auth: 'offline',
       version: VERSION,
-      plugins: { physics: false }, // mirror production
+      // Physics enabled, mirroring production.
     });
-    installInteractionHelpers(bot);   // lookAt override + sendServerPosition
-    trackPositionWithoutPhysics(bot); // position sync + teleport_confirm
 
     const serverLines = [];
     server.on('line', (line) => { serverLines.push(line); });

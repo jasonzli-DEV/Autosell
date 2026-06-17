@@ -20,7 +20,7 @@ function makeBot(raycastResult, overrides = {}) {
     openBlockArgs: null,
     entity: { position: new Vec3(0.5, 0, 2), eyeHeight: 1.62, yaw: 0, pitch: 0 },
     world: { raycast: () => raycastResult },
-    sendServerPosition: () => order.push('sendServerPosition'),
+    lookAt: async () => { order.push('lookAt'); },
     _client: { on: () => {}, removeListener: () => {} },
     openBlock: async (...args) => { order.push('openBlock'); bot.openBlockArgs = args; return { inventoryStart: 0, slots: [], close: () => {} }; },
     clickWindow: async () => {},

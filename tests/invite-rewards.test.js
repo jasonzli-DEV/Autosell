@@ -113,7 +113,6 @@ test('minecraft payer uses one fixed token-cache profile without prompting for e
     profilesFolder: '.minecraft-auth',
     version: '1.21.11',
     hideErrors: true,
-    plugins: { physics: false },
   });
 
   const trace = formatPacketTraceForLog([
