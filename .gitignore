@@ -24,6 +24,9 @@ coverage/
 dist/
 build/
 
+# minecraft-wrap server/jar download cache (integration tests)
+versions/
+
 # Package manager caches
 .npm/
 .pnpm-store/

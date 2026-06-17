@@ -5,6 +5,7 @@ const {
   ButtonStyle,
   MessageFlags,
 } = require('discord.js');
+const { Vec3 } = require('vec3');
 const { getSettings, updateSettings } = require('../lib/botSettings');
 const { getUserSettings } = require('../lib/userSettings');
 const { getLtcUsdPrice } = require('../lib/price');
@@ -203,26 +204,38 @@ function findEnderchest(bot) {
   return bot.findBlock({ matching: ecId, maxDistance: ENDERCHEST_MAX_DISTANCE });
 }
 
+// prismarine block face indices → unit normal vectors (what openBlock expects).
+const FACE_VECTORS = [
+  new Vec3(0, -1, 0), // 0 bottom
+  new Vec3(0, 1, 0),  // 1 top
+  new Vec3(0, 0, -1), // 2 north
+  new Vec3(0, 0, 1),  // 3 south
+  new Vec3(-1, 0, 0), // 4 west
+  new Vec3(1, 0, 0),  // 5 east
+];
+
+// Raycasts from the bot's eye toward a block and returns the face the ray enters
+// plus the cursor position on that face (relative coordinates in [0,1]). Returns
+// null if the ray doesn't hit the target block, in which case the caller falls back
+// to mineflayer's default interaction.
+function raycastBlockFace(bot, block) {
+  if (!bot.world?.raycast || !bot.entity?.position) return null;
+  const eye = bot.entity.position.offset(0, bot.entity.eyeHeight ?? 1.62, 0);
+  const center = block.position.offset(0.5, 0.5, 0.5);
+  const dir = center.minus(eye).normalize();
+  const hit = bot.world.raycast(eye, dir, 6);
+  if (!hit?.position?.equals(block.position) || hit.face == null || !hit.intersect) return null;
+  const faceVec = FACE_VECTORS[hit.face];
+  if (!faceVec) return null;
+  return { faceVec, cursor: hit.intersect.minus(block.position) };
+}
+
 async function depositIntoEnderchest(bot, ecBlock) {
   // Physics is disabled, so the bot never sends a serverbound position packet on its
   // own. Without one the server has no confirmed client position and silently ignores
   // the block_place interaction — windowOpen never fires. Tell the server where we
   // stand (on the ground, looking at the chest) before each open attempt.
   const ecCenter = ecBlock.position.offset(0.5, 0.5, 0.5);
-
-  // The bot picks spawners up into its hand. Right-clicking the enderchest while
-  // holding a placeable block (spawner / shulker box) makes the server read the
-  // interaction as a block placement, which DonutSMP blocks — it cancels the action
-  // (acking the sequence) and never opens the chest, so windowOpen never fires.
-  // Empty the hand first so the right-click unambiguously opens the chest.
-  if (bot.heldItem) {
-    try {
-      await bot.unequip('hand');
-      await sleep(POSITION_SETTLE_MS);
-    } catch (err) {
-      console.warn(`[SpawnerSell] Could not empty hand before opening enderchest: ${err.message}`);
-    }
-  }
 
   let window;
   for (let attempt = 1; attempt <= 3; attempt++) {
@@ -234,12 +247,20 @@ async function depositIntoEnderchest(bot, ecBlock) {
     try {
       bot.sendServerPosition?.(ecCenter);
       await sleep(POSITION_SETTLE_MS);
+
+      // mineflayer's activateBlock hardcodes the top face with a centre cursor, which
+      // is geometrically impossible (a top-face click needs cursorY = 1.0). Strict
+      // anticheat (Grim, on DonutSMP) rejects that mismatch: it acks the interaction
+      // but never opens the chest. Raycast from the eye to find the real face + cursor.
+      const aim = raycastBlockFace(bot, ecBlock);
       console.log(
         `[SpawnerSell] openBlock attempt ${attempt}: block=${ecBlock.name}@${ecBlock.position} ` +
-        `botPos=${bot.entity?.position} held=${bot.heldItem?.name ?? 'empty'} ` +
-        `quickBarSlot=${bot.quickBarSlot ?? '?'} dist=${bot.entity?.position?.distanceTo?.(ecCenter)?.toFixed?.(2)}`,
+        `botPos=${bot.entity?.position} dist=${bot.entity?.position?.distanceTo?.(ecCenter)?.toFixed?.(2)} ` +
+        `aim=${aim ? `face=${aim.faceVec} cursor=${aim.cursor}` : 'raycast-miss(using default face)'}`,
       );
-      window = await bot.openBlock(ecBlock);
+      window = aim
+        ? await bot.openBlock(ecBlock, aim.faceVec, aim.cursor)
+        : await bot.openBlock(ecBlock);
       break;
     } catch (err) {
       const counts = received.reduce((m, n) => { m[n] = (m[n] || 0) + 1; return m; }, {});
@@ -867,6 +888,8 @@ async function postSpawnerSellPanel(interaction) {
 
 module.exports = {
   depositIntoEnderchest,
+  raycastBlockFace,
+  FACE_VECTORS,
   spawnerSellEnterCustomId,
   spawnerSellResendTpaCustomId,
   spawnerSellRecheckEcCustomId,

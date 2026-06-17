@@ -68,50 +68,7 @@ class DonutMinecraftPayer extends EventEmitter {
       console.log(`[InviteRewards] Connecting Minecraft payer to ${config.host}:${config.port} as ${username}.`);
       this.bot = mineflayer.createBot(botOptions);
 
-      // physics plugin is disabled — its lookAt awaits a physics-tick promise that
-      // never resolves, so activateBlock (called by openBlock) hangs forever before
-      // writing block_place. Override unconditionally: calculate rotation, send a
-      // look packet immediately, and return without waiting.
-      this.bot.lookAt = async (point) => {
-        const bot = this.bot;
-        if (!point || !bot.entity?.position) return;
-        try {
-          const packet = buildPositionLookPacket(bot.entity, point);
-          bot.entity.yaw = packet._yaw;
-          bot.entity.pitch = packet._pitch;
-          bot._client.write('look', {
-            yaw: packet.yaw,
-            pitch: packet.pitch,
-            onGround: true,                                           // pre-1.21.3
-            flags: { onGround: true, hasHorizontalCollision: false }, // 1.21.3+
-          });
-        } catch {}
-      };
-
-      // Physics is disabled, so the bot never sends a serverbound position packet.
-      // Without one the server has no confirmed client position and silently drops
-      // block interactions (e.g. opening an enderchest never fires windowOpen). Send
-      // a position_look establishing where we stand, on the ground, optionally aimed
-      // at a target block, before interacting. Version-safe: include both the legacy
-      // onGround boolean and the 1.21.3+ flags object.
-      this.bot.sendServerPosition = (lookAtPoint = null) => {
-        const bot = this.bot;
-        if (!bot?.entity?.position) return;
-        try {
-          const packet = buildPositionLookPacket(bot.entity, lookAtPoint);
-          bot.entity.yaw = packet._yaw;
-          bot.entity.pitch = packet._pitch;
-          bot._client.write('position_look', {
-            x: packet.x,
-            y: packet.y,
-            z: packet.z,
-            yaw: packet.yaw,
-            pitch: packet.pitch,
-            onGround: true,                                           // pre-1.21.3
-            flags: { onGround: true, hasHorizontalCollision: false }, // 1.21.3+
-          });
-        } catch {}
-      };
+      installInteractionHelpers(this.bot);
       this.packetTrace = attachPacketDiagnostics(this.bot);
 
       const failBeforeSpawn = (err) => {
@@ -348,6 +305,53 @@ function buildPositionLookPacket(entity, lookAtPoint = null) {
   };
 }
 
+// Installs the interaction helpers a physics-disabled bot needs. With the physics
+// plugin off the bot never ticks, so two things break that these helpers replace:
+//   1. lookAt() awaits a physics-tick promise that never resolves, hanging
+//      activateBlock (and therefore openBlock) before it can write block_place.
+//      We override it to compute rotation and write a `look` packet immediately.
+//   2. The bot never sends a serverbound position packet, so the server has no
+//      confirmed client position and silently drops block interactions. We expose
+//      sendServerPosition() to push a position_look before interacting.
+// Both packets are version-safe: they include the legacy onGround boolean and the
+// 1.21.3+ flags object so the serialiser can use whichever the protocol expects.
+function installInteractionHelpers(bot) {
+  bot.lookAt = async (point) => {
+    if (!point || !bot.entity?.position) return;
+    try {
+      const packet = buildPositionLookPacket(bot.entity, point);
+      bot.entity.yaw = packet._yaw;
+      bot.entity.pitch = packet._pitch;
+      bot._client.write('look', {
+        yaw: packet.yaw,
+        pitch: packet.pitch,
+        onGround: true,
+        flags: { onGround: true, hasHorizontalCollision: false },
+      });
+    } catch {}
+  };
+
+  bot.sendServerPosition = (lookAtPoint = null) => {
+    if (!bot.entity?.position) return;
+    try {
+      const packet = buildPositionLookPacket(bot.entity, lookAtPoint);
+      bot.entity.yaw = packet._yaw;
+      bot.entity.pitch = packet._pitch;
+      bot._client.write('position_look', {
+        x: packet.x,
+        y: packet.y,
+        z: packet.z,
+        yaw: packet.yaw,
+        pitch: packet.pitch,
+        onGround: true,
+        flags: { onGround: true, hasHorizontalCollision: false },
+      });
+    } catch {}
+  };
+
+  return bot;
+}
+
 function buildMinecraftBotOptions({ config, mineflayer }) {
   return {
     host: config.host,
@@ -458,6 +462,7 @@ module.exports = {
   MinecraftPayoutError,
   buildMinecraftBotOptions,
   buildPositionLookPacket,
+  installInteractionHelpers,
   getMinecraftAuthProfile,
   formatPacketTraceForLog,
   getPacketTrace,
