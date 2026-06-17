@@ -38,7 +38,7 @@ class DonutMinecraftPayer extends EventEmitter {
       host: this.options.host || DEFAULT_HOST,
       port: Number(this.options.port || DEFAULT_PORT),
       auth: this.options.auth || DEFAULT_AUTH,
-      version: this.options.version || '',
+      version: this.options.version || process.env.MC_VERSION || '',
       profilesFolder: this.options.profilesFolder || DEFAULT_PROFILES_FOLDER,
     };
   }
@@ -105,6 +105,8 @@ class DonutMinecraftPayer extends EventEmitter {
       this.bot.on('kicked', (reason) => {
         const text = typeof reason === 'string' ? reason : JSON.stringify(reason);
         console.warn('[InviteRewards] Minecraft payer kicked:', text.slice(0, 200));
+        // Dump the last packets so we can see which serverbound packet triggered the kick.
+        console.warn('[InviteRewards] packet trace before kick:\n' + formatPacketTraceForLog((this.packetTrace || []).slice(-30)));
         failBeforeSpawn(new Error(`Kicked from DonutSMP: ${text.slice(0, 200)}`));
         this.handleDisconnect('kicked');
       });
@@ -252,20 +254,25 @@ function getMinecraftAuthProfile() {
   return AUTH_PROFILE;
 }
 
-function getMinecraftVersion(config, mineflayer) {
+function getMinecraftVersion(config) {
   const configured = `${config.version || ''}`.trim();
   if (configured) return configured;
-  return mineflayer?.latestSupportedVersion || '1.21.11';
+  // Auto-negotiate the server's actual protocol version. DonutSMP runs an older
+  // version behind ViaVersion; forcing the newest version mineflayer supports made
+  // it translate our (physics) movement packets incorrectly → "Invalid sequence"
+  // kicks. Letting mineflayer detect the real version sends correctly-formed packets.
+  // Set MC_VERSION to pin a specific version if auto-detection ever misfires.
+  return false;
 }
 
-function buildMinecraftBotOptions({ config, mineflayer }) {
+function buildMinecraftBotOptions({ config }) {
   return {
     host: config.host,
     port: config.port,
     username: getMinecraftAuthProfile(),
     auth: config.auth,
     profilesFolder: config.profilesFolder,
-    version: getMinecraftVersion(config, mineflayer),
+    version: getMinecraftVersion(config),
     hideErrors: true,
     // Physics stays ENABLED: the spawner-sell flow teleports the bot, picks up items,
     // and opens an enderchest. Anti-cheat (Grim on DonutSMP) verifies players via a
@@ -364,6 +371,12 @@ function getPayerBot() {
   return payer.bot;
 }
 
+// True only when the bot is fully logged in (in the play state). bot.chat and block
+// interactions throw if called mid-login/reconnect, so callers must check this first.
+function isPayerConnected() {
+  return Boolean(payer.connected && payer.bot?.entity);
+}
+
 function getPacketTrace() {
   return payer.packetTrace || [];
 }
@@ -378,4 +391,5 @@ module.exports = {
   startMinecraftPayer,
   sendDonutPayment,
   getPayerBot,
+  isPayerConnected,
 };

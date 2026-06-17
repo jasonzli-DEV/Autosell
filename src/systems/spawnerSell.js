@@ -10,7 +10,7 @@ const { getSettings, updateSettings } = require('../lib/botSettings');
 const { getUserSettings } = require('../lib/userSettings');
 const { getLtcUsdPrice } = require('../lib/price');
 const { sendLtc } = require('../lib/ltc');
-const { getPayerBot, getPacketTrace, formatPacketTraceForLog } = require('../lib/minecraftPayer');
+const { getPayerBot, isPayerConnected, getPacketTrace, formatPacketTraceForLog } = require('../lib/minecraftPayer');
 const { logInfo, logSuccess, logError } = require('../lib/logger');
 
 const spawnerSellEnterCustomId = 'spawner_sell_enter';
@@ -82,7 +82,7 @@ function clearSession(session) {
 
 function requireBot() {
   const bot = getPayerBot();
-  if (!bot) throw new Error('Minecraft bot is not connected.');
+  if (!bot || !isPayerConnected()) throw new Error('Minecraft bot is not connected.');
   return bot;
 }
 
@@ -701,7 +701,7 @@ async function handleSpawnerSellEnter(interaction) {
   }
 
   const bot = getPayerBot();
-  if (!bot) {
+  if (!bot || !isPayerConnected()) {
     return interaction.editReply({
       embeds: [errorEmbed('The Minecraft bot is currently offline. Try again shortly.')],
     });

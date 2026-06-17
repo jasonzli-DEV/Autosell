@@ -97,6 +97,8 @@ test('minecraft payer uses one fixed token-cache profile without prompting for e
 
   assert.equal(getMinecraftAuthProfile(), 'invite-reward-payer');
 
+  // With no configured version, mineflayer auto-negotiates the server's real
+  // protocol version (version: false) instead of forcing the newest one.
   assert.deepEqual(buildMinecraftBotOptions({
     config: {
       host: 'donutsmp.net',
@@ -104,16 +106,20 @@ test('minecraft payer uses one fixed token-cache profile without prompting for e
       auth: 'microsoft',
       profilesFolder: '.minecraft-auth',
     },
-    mineflayer: { latestSupportedVersion: '1.21.11' },
   }), {
     host: 'donutsmp.net',
     port: 25565,
     username: 'invite-reward-payer',
     auth: 'microsoft',
     profilesFolder: '.minecraft-auth',
-    version: '1.21.11',
+    version: false,
     hideErrors: true,
   });
+
+  // An explicit version (e.g. via MC_VERSION) is still honoured.
+  assert.equal(buildMinecraftBotOptions({
+    config: { host: 'donutsmp.net', port: 25565, auth: 'microsoft', profilesFolder: '.minecraft-auth', version: '1.21.4' },
+  }).version, '1.21.4');
 
   const trace = formatPacketTraceForLog([
     { direction: 'in', state: 'configuration', name: 'finish_configuration', size: 3, hex: '030102' },
