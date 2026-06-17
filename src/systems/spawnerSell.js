@@ -105,90 +105,90 @@ function isSpawnerItem(name) {
   return name === 'spawner' || name === 'monster_spawner';
 }
 
-// Reads the first lore line's mob type from the 1.20.5+ components array.
-// DonutSMP stores the mob name (e.g. "Skeleton") as the text of the first
-// extra element on the first lore line.
-function getSpawnerMobType(components) {
-  if (!Array.isArray(components)) return null;
-  try {
-    const loreComp = components.find(c => c.type === 'lore');
-    if (!loreComp?.data?.length) return null;
-    const firstLine = loreComp.data[0];
-
-    // NBT-compound wrapped: data[0].value.extra.value.value[0].value.text.value
-    const extras = firstLine?.value?.extra?.value?.value;
-    if (Array.isArray(extras) && extras.length > 0) {
-      const text = extras[0]?.value?.text?.value ?? extras[0]?.text?.value;
-      if (text) return text;
-    }
-
-    // Plain TextComponent: data[0].extra[0].text
-    const extra2 = firstLine?.extra;
-    if (Array.isArray(extra2) && extra2.length > 0) {
-      const text = extra2[0]?.text;
-      if (typeof text === 'string') return text;
-      if (text?.value) return text.value;
-    }
-
-    return null;
-  } catch {
-    return null;
+// Recursively collects every string value out of a (possibly NBT-wrapped) value —
+// chat components, lore, block_entity_data, etc. — so we can search the whole item
+// for a mob name regardless of how the server nests it.
+function collectStrings(node, out) {
+  if (node == null) return out;
+  if (typeof node === 'string') { out.push(node); return out; }
+  if (Array.isArray(node)) {
+    for (const n of node) collectStrings(n, out);
+    return out;
   }
+  if (typeof node === 'object') {
+    for (const key of Object.keys(node)) collectStrings(node[key], out);
+  }
+  return out;
+}
+
+// A spawner counts as a skeleton spawner if "skeleton" appears anywhere in its
+// components (DonutSMP names them "Skeleton Spawner" via custom_name; vanilla stores
+// the mob in block_entity_data). Searching all components is robust to format changes.
+function mentionsSkeleton(components) {
+  if (!Array.isArray(components)) return false;
+  const strings = collectStrings(components, []);
+  return strings.some(s => s.toLowerCase().includes('skeleton'));
 }
 
 function isSkeletonSpawner(item) {
-  if (!isSpawnerItem(item.name)) return false;
-  const mob = getSpawnerMobType(item.components);
-  if (!mob) return false;
-  return mob.toLowerCase() === 'skeleton';
+  return isSpawnerItem(item.name) && mentionsSkeleton(item.components);
 }
 
-function countSpawnersInShulkerComponents(components) {
-  if (!Array.isArray(components)) return 0;
-  try {
-    const containerComp = components.find(c => c.type === 'minecraft:container' || c.type === 'container');
-    if (!containerComp) {
-      console.log('[SpawnerSell] shulker component types:', JSON.stringify(components.map(c => c.type)));
-      return 0;
-    }
-    console.log('[SpawnerSell] shulker container data type:', typeof containerComp.data, Array.isArray(containerComp.data) ? 'array' : JSON.stringify(containerComp.data)?.slice(0, 200));
-
-    // data can be a plain array or NBT-wrapped list: { type:'list', value:{ type:'compound', value:[...] } }
-    let slots;
-    if (Array.isArray(containerComp.data)) {
-      slots = containerComp.data;
-    } else {
-      slots = containerComp.data?.value?.value;
-      if (!Array.isArray(slots)) return 0;
-    }
-
-    return slots.reduce((sum, slotEntry) => {
-      // Plain: { slot, item } — NBT: { value: { slot: {value}, item: {value} } }
-      const slotItem = slotEntry?.item ?? slotEntry?.value?.item?.value;
-      if (!slotItem) return sum;
-      const id = (slotItem.id?.value ?? slotItem.id ?? slotItem.name?.value ?? slotItem.name ?? '').replace('minecraft:', '');
-      if (!isSpawnerItem(id)) return sum;
-      const count = slotItem.count?.value ?? slotItem.Count?.value ?? slotItem.count ?? 1;
-      const itemComponents = Array.isArray(slotItem.components) ? slotItem.components : null;
-      if (itemComponents) {
-        const mob = getSpawnerMobType(itemComponents);
-        if (mob && mob.toLowerCase() !== 'skeleton') return sum;
-      }
-      return sum + count;
-    }, 0);
-  } catch (err) {
-    console.log('[SpawnerSell] shulker parse error:', err.message);
-    return 0;
+// prismarine-item factory for the bot's version, used to parse shulker contents.
+let _itemFactory = null;
+let _itemFactoryVersion = null;
+function getItemFactory(bot) {
+  const version = bot?.version || bot?.registry?.version?.minecraftVersion;
+  if (!version) return null;
+  if (!_itemFactory || _itemFactoryVersion !== version) {
+    _itemFactory = require('prismarine-item')(version);
+    _itemFactoryVersion = version;
   }
+  return _itemFactory;
 }
 
-function countSpawnersInItems(items) {
+// Pulls the slot entries out of a shulker box's container component. The 1.20.5+
+// network format is { contents: [ { itemId, itemCount, components }, ... ] }; older
+// shapes (plain array, NBT-wrapped list) are handled as fallbacks.
+function getContainerContents(components) {
+  if (!Array.isArray(components)) return null;
+  const comp = components.find(c => c.type === 'minecraft:container' || c.type === 'container');
+  if (!comp) return null;
+  const data = comp.data;
+  if (Array.isArray(data?.contents)) return data.contents;
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.value?.value)) return data.value.value;
+  return null;
+}
+
+function countSpawnersInShulker(shulkerComponents, bot) {
+  const contents = getContainerContents(shulkerComponents);
+  if (!contents) return 0;
+  const Item = getItemFactory(bot);
+  if (!Item) return 0;
+
+  let total = 0;
+  for (const entry of contents) {
+    let slotItem;
+    try {
+      slotItem = Item.fromNotch(entry);
+    } catch {
+      continue;
+    }
+    if (slotItem && isSkeletonSpawner(slotItem)) {
+      total += slotItem.count;
+    }
+  }
+  return total;
+}
+
+function countSpawnersInItems(items, bot) {
   let total = 0;
   for (const item of items) {
     if (isSkeletonSpawner(item)) {
       total += item.count;
     } else if (item.name.endsWith('_shulker_box')) {
-      total += countSpawnersInShulkerComponents(item.components);
+      total += countSpawnersInShulker(item.components, bot);
     }
   }
   return total;
@@ -511,8 +511,8 @@ async function onSpawnerDone(session) {
   const bot = requireBot();
   const inventoryAfter = snapshotInventory(bot);
 
-  const before = countSpawnersInItems(session.inventoryBefore);
-  const after = countSpawnersInItems(inventoryAfter);
+  const before = countSpawnersInItems(session.inventoryBefore, bot);
+  const after = countSpawnersInItems(inventoryAfter, bot);
   const newSpawners = after - before;
   console.log(`[SpawnerSell] spawnersBefore=${before} spawnersAfter=${after} new=${newSpawners}`);
 
@@ -879,6 +879,9 @@ async function postSpawnerSellPanel(interaction) {
 module.exports = {
   depositIntoEnderchest,
   relocateUntilMoved,
+  countSpawnersInItems,
+  countSpawnersInShulker,
+  isSkeletonSpawner,
   raycastBlockFace,
   FACE_VECTORS,
   spawnerSellEnterCustomId,
