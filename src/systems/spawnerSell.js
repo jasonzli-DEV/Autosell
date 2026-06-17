@@ -121,12 +121,20 @@ function collectStrings(node, out) {
   return out;
 }
 
-// A spawner counts as a skeleton spawner if "skeleton" appears anywhere in its
-// components (DonutSMP names them "Skeleton Spawner" via custom_name; vanilla stores
-// the mob in block_entity_data). Searching all components is robust to format changes.
+// custom_name / item_name are the display name, which players can change with an
+// anvil — so they must NEVER be trusted for the mob type, or someone could rename a
+// cheap spawner "Skeleton Spawner" to trick the bot into paying out.
+const RENAMEABLE_COMPONENT_TYPES = new Set([
+  'custom_name', 'minecraft:custom_name', 'item_name', 'minecraft:item_name',
+]);
+
+// A spawner counts as a skeleton spawner only if "skeleton" appears in a component a
+// player cannot edit: the plugin-set lore or the spawner's block_entity_data (its
+// SpawnData entity id). The renameable display name is excluded.
 function mentionsSkeleton(components) {
   if (!Array.isArray(components)) return false;
-  const strings = collectStrings(components, []);
+  const trusted = components.filter(c => !RENAMEABLE_COMPONENT_TYPES.has(c?.type));
+  const strings = collectStrings(trusted, []);
   return strings.some(s => s.toLowerCase().includes('skeleton'));
 }
 
