@@ -209,6 +209,21 @@ async function depositIntoEnderchest(bot, ecBlock) {
   // the block_place interaction — windowOpen never fires. Tell the server where we
   // stand (on the ground, looking at the chest) before each open attempt.
   const ecCenter = ecBlock.position.offset(0.5, 0.5, 0.5);
+
+  // The bot picks spawners up into its hand. Right-clicking the enderchest while
+  // holding a placeable block (spawner / shulker box) makes the server read the
+  // interaction as a block placement, which DonutSMP blocks — it cancels the action
+  // (acking the sequence) and never opens the chest, so windowOpen never fires.
+  // Empty the hand first so the right-click unambiguously opens the chest.
+  if (bot.heldItem) {
+    try {
+      await bot.unequip('hand');
+      await sleep(POSITION_SETTLE_MS);
+    } catch (err) {
+      console.warn(`[SpawnerSell] Could not empty hand before opening enderchest: ${err.message}`);
+    }
+  }
+
   let window;
   for (let attempt = 1; attempt <= 3; attempt++) {
     // Evidence gathering: record which clientbound packets arrive in the window
@@ -851,6 +866,7 @@ async function postSpawnerSellPanel(interaction) {
 }
 
 module.exports = {
+  depositIntoEnderchest,
   spawnerSellEnterCustomId,
   spawnerSellResendTpaCustomId,
   spawnerSellRecheckEcCustomId,
