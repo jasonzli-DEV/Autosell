@@ -5,6 +5,11 @@ const { logInfo, logSuccess, logError } = require('./logger');
 const DEFAULT_HOST = 'donutsmp.net';
 const DEFAULT_PORT = 25565;
 const DEFAULT_AUTH = 'microsoft';
+// 1.21.1 is the last version before 1.21.2 added the mandatory per-tick `tick_end`
+// packet. mineflayer never sends tick_end, so on >=1.21.2 the server sees our
+// position packets as an invalid packet sequence and kicks ("Invalid sequence").
+// DonutSMP runs ViaVersion, so a 1.21.1 client bridges fine to its real version.
+const DEFAULT_VERSION = '1.21.1';
 const DEFAULT_CONFIRM_TIMEOUT_MS = 20_000;
 const DEFAULT_PROFILES_FOLDER = path.join(process.cwd(), '.minecraft-auth');
 const AUTH_PROFILE = 'invite-reward-payer';
@@ -257,12 +262,9 @@ function getMinecraftAuthProfile() {
 function getMinecraftVersion(config) {
   const configured = `${config.version || ''}`.trim();
   if (configured) return configured;
-  // Auto-negotiate the server's actual protocol version. DonutSMP runs an older
-  // version behind ViaVersion; forcing the newest version mineflayer supports made
-  // it translate our (physics) movement packets incorrectly → "Invalid sequence"
-  // kicks. Letting mineflayer detect the real version sends correctly-formed packets.
-  // Set MC_VERSION to pin a specific version if auto-detection ever misfires.
-  return false;
+  // Pin a pre-1.21.2 client so mineflayer's missing tick_end packet doesn't trip the
+  // server's movement-sequence check. Override with MC_VERSION if DonutSMP changes.
+  return DEFAULT_VERSION;
 }
 
 function buildMinecraftBotOptions({ config }) {
