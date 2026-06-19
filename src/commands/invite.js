@@ -4,12 +4,19 @@ const {
   handleAdminInviteAdd,
   handleAdminInviteSet,
   handleAdminInviteRemove,
+  handleAdminInviteToggle,
 } = require('../systems/inviteRewards');
 
-module.exports = {
-  data: new SlashCommandBuilder()
+function buildInviteCommand(invitesEnabled = true) {
+  const statusLabel = invitesEnabled ? 'currently enabled' : 'currently disabled';
+  return new SlashCommandBuilder()
     .setName('invite')
     .setDescription('Admin invite management')
+    .addSubcommand(sub =>
+      sub
+        .setName('toggle')
+        .setDescription(`Toggle invite tracking and rewards on/off (${statusLabel})`),
+    )
     .addSubcommand(sub =>
       sub
         .setName('view')
@@ -50,10 +57,16 @@ module.exports = {
         .addIntegerOption(opt =>
           opt.setName('count').setDescription('Number of payable invites to remove (omit to remove all)').setMinValue(1).setRequired(false),
         ),
-    ),
+    );
+}
+
+module.exports = {
+  buildInviteCommand,
+  data: buildInviteCommand(true),
 
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();
+    if (sub === 'toggle') return handleAdminInviteToggle(interaction);
     if (sub === 'view') return handleAdminInviteView(interaction);
     if (sub === 'add') return handleAdminInviteAdd(interaction);
     if (sub === 'set') return handleAdminInviteSet(interaction);

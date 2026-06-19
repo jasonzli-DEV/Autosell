@@ -16,6 +16,7 @@ const botSettingsSchema = new mongoose.Schema({
   spawnerSellPriceEach: { type: Number, default: 0.2 },          // customer pays $X per skeleton spawner
   inviteRewardPayoutPerInvite: { type: Number, default: 10_000_000 },
   inviteRewardMinimumInvites: { type: Number, default: 5 },
+  invitesEnabled: { type: Boolean, default: true },
   inviteRewardPanelChannelId: { type: String, default: null },
   inviteRewardPanelMessageId: { type: String, default: null },
   spawnerSellPanelChannelId: { type: String, default: null },

@@ -24,6 +24,11 @@ const inviteRewardClaimCustomId = 'invite_reward_claim';
 const inviteRewardClaimModalCustomId = 'invite_reward_claim_modal';
 
 const inviteCache = new Map();
+let _reregisterCommands = null;
+
+function setCommandReregisterFn(fn) {
+  _reregisterCommands = fn;
+}
 
 function getAdminIds() {
   return (process.env.ADMIN_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
@@ -268,6 +273,9 @@ async function handleInviteRewardClaimModal(interaction) {
 
 async function processInviteRewardClaim(interaction, ign) {
   const settings = await getSettings();
+  if (settings.invitesEnabled === false) {
+    return interaction.editReply({ embeds: [errorEmbed('Invite rewards are currently disabled.')] });
+  }
   const config = getInviteRewardConfig(settings);
   const stats = await getInviteRewardStats(interaction.guildId, interaction.user.id);
 
@@ -538,6 +546,38 @@ async function handleAdminInviteRemove(interaction) {
   return interaction.editReply({ embeds: [successEmbed(`Removed **${toRemove}** payable invite(s) from <@${user.id}>.`)] });
 }
 
+async function handleAdminInviteToggle(interaction) {
+  if (!isAdmin(interaction)) {
+    return interaction.reply({ embeds: [errorEmbed('You do not have permission to use this command.')], flags: MessageFlags.Ephemeral });
+  }
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const settings = await getSettings();
+  const current = settings.invitesEnabled !== false;
+  const next = !current;
+  await updateSettings({ invitesEnabled: next });
+
+  const statusLine = next ? '✅ **Enabled**' : '❌ **Disabled**';
+  await logInfo(
+    'Invite System Toggled',
+    `<@${interaction.user.id}> toggled invites to **${next ? 'enabled' : 'disabled'}**.`,
+    [],
+    { category: 'invite' },
+  );
+
+  if (_reregisterCommands) {
+    _reregisterCommands(next).catch(err => console.error('[InviteRewards] Failed to re-register commands after toggle:', err));
+  }
+
+  return interaction.editReply({
+    embeds: [
+      new EmbedBuilder()
+        .setColor(next ? 0x57F287 : 0xED4245)
+        .setTitle('Invite System Toggled')
+        .setDescription(`Invite tracking and rewards are now ${statusLine}.`),
+    ],
+  });
+}
+
 async function postInviteRewardPanel(interaction) {
   if (!isAdmin(interaction)) {
     return interaction.reply({
@@ -644,6 +684,9 @@ function findUsedInvite(before = new Map(), afterInvites) {
 }
 
 async function handleInviteRewardMemberAdd(member) {
+  const settings = await getSettings();
+  if (settings.invitesEnabled === false) return;
+
   const before = inviteCache.get(member.guild.id) || new Map();
   let afterInvites;
   try {
@@ -763,6 +806,8 @@ module.exports = {
   handleAdminInviteAdd,
   handleAdminInviteSet,
   handleAdminInviteRemove,
+  handleAdminInviteToggle,
+  setCommandReregisterFn,
   postInviteRewardPanel,
   configureInviteRewards,
   initializeInviteRewardTracking,

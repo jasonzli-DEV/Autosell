@@ -8,12 +8,13 @@ bitcoin.initEccLib(ecc);
 const { Client, GatewayIntentBits, REST, Routes, MessageFlags, EmbedBuilder } = require('discord.js');
 const { initWallet, getWalletAddress } = require('./src/lib/ltc');
 const { connectDb } = require('./src/lib/db');
+const { getSettings } = require('./src/lib/botSettings');
 const { setClient } = require('./src/queue');
 const { setPanelClient } = require('./src/lib/panelManager');
 const { setVcClient, updateVoiceChannelName } = require('./src/lib/voiceChannel');
 const { setLoggerClient, logInfo } = require('./src/lib/logger');
 const { setGiveawayClient, resumeActiveGiveaways } = require('./src/systems/giveaway');
-const { initializeInviteRewardTracking } = require('./src/systems/inviteRewards');
+const { initializeInviteRewardTracking, setCommandReregisterFn } = require('./src/systems/inviteRewards');
 const { setSpawnerClient } = require('./src/systems/spawnerSell');
 const { startMinecraftPayer } = require('./src/lib/minecraftPayer');
 const { handlePanelCategorySelect, handleFlowPaymentMethod, handleFlowSpawnerUnit } = require('./src/systems/tickets');
@@ -27,7 +28,7 @@ const ticketCommand = require('./src/commands/ticket');
 const giveawayCommand = require('./src/commands/giveaway');
 const setCommand = require('./src/commands/set');
 const lookupCommand = require('./src/commands/lookup');
-const inviteCommand = require('./src/commands/invite');
+const { buildInviteCommand, ...inviteCommand } = require('./src/commands/invite');
 const handleButton = require('./src/interactions/button');
 const handleModal = require('./src/interactions/modal');
 const { isStaleInteractionError } = require('./src/lib/interactionErrors');
@@ -62,18 +63,35 @@ setGiveawayClient(client);
 initializeInviteRewardTracking(client);
 setSpawnerClient(client);
 
-const commands = [
-  panelCommand.data.toJSON(),
-  payCommand.data.toJSON(),
-  withdrawCommand.data.toJSON(),
-  killCommand.data.toJSON(),
-  startCommand.data.toJSON(),
-  ticketCommand.data.toJSON(),
-  giveawayCommand.data.toJSON(),
-  setCommand.data.toJSON(),
-  lookupCommand.data.toJSON(),
-  inviteCommand.data.toJSON(),
-];
+function buildCommandList(invitesEnabled = true) {
+  return [
+    panelCommand.data.toJSON(),
+    payCommand.data.toJSON(),
+    withdrawCommand.data.toJSON(),
+    killCommand.data.toJSON(),
+    startCommand.data.toJSON(),
+    ticketCommand.data.toJSON(),
+    giveawayCommand.data.toJSON(),
+    setCommand.data.toJSON(),
+    lookupCommand.data.toJSON(),
+    buildInviteCommand(invitesEnabled).toJSON(),
+  ];
+}
+
+async function registerCommands(rest, invitesEnabled) {
+  const body = buildCommandList(invitesEnabled);
+  if (process.env.DISCORD_GUILD_ID) {
+    await rest.put(
+      Routes.applicationGuildCommands(process.env.DISCORD_CLIENT_ID, process.env.DISCORD_GUILD_ID),
+      { body },
+    );
+  } else {
+    await rest.put(
+      Routes.applicationCommands(process.env.DISCORD_CLIENT_ID),
+      { body },
+    );
+  }
+}
 
 const commandMap = {
   panel: panelCommand,
@@ -101,20 +119,24 @@ client.once('clientReady', async () => {
 
   const rest = new REST().setToken(process.env.DISCORD_TOKEN);
 
+  let initialInvitesEnabled = true;
   try {
-    if (process.env.DISCORD_GUILD_ID) {
-      await rest.put(
-        Routes.applicationGuildCommands(process.env.DISCORD_CLIENT_ID, process.env.DISCORD_GUILD_ID),
-        { body: commands },
-      );
-      console.log('Slash commands registered (guild — instant).');
-    } else {
-      await rest.put(
-        Routes.applicationCommands(process.env.DISCORD_CLIENT_ID),
-        { body: commands },
-      );
-      console.log('Slash commands registered globally (may take up to 1 hour).');
-    }
+    const settings = await getSettings();
+    initialInvitesEnabled = settings.invitesEnabled !== false;
+  } catch (err) {
+    console.warn('Could not fetch settings for command registration:', err.message);
+  }
+
+  setCommandReregisterFn(async (invitesEnabled) => {
+    await registerCommands(rest, invitesEnabled);
+    console.log(`Slash commands re-registered (invites ${invitesEnabled ? 'enabled' : 'disabled'}).`);
+  });
+
+  try {
+    await registerCommands(rest, initialInvitesEnabled);
+    console.log(process.env.DISCORD_GUILD_ID
+      ? 'Slash commands registered (guild — instant).'
+      : 'Slash commands registered globally (may take up to 1 hour).');
   } catch (err) {
     console.error('Failed to register slash commands:', err);
   }
