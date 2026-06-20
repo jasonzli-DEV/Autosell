@@ -13,7 +13,7 @@ const { getSettings, updateSettings } = require('../lib/botSettings');
 const { InviteRewardInvite, InviteRewardClaim } = require('../lib/models');
 const { getUserSettings } = require('../lib/userSettings');
 const { validateIgn } = require('../lib/donut');
-const { sendDonutPayment } = require('../lib/minecraftPayer');
+const { sendDonutPayment, startMinecraftPayer, stopMinecraftPayer } = require('../lib/minecraftPayer');
 const { logInfo, logSuccess, logError } = require('../lib/logger');
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
@@ -563,6 +563,12 @@ async function handleAdminInviteToggle(interaction) {
     [],
     { category: 'invite' },
   );
+
+  if (next) {
+    startMinecraftPayer().catch(err => console.error('[InviteRewards] Failed to connect Minecraft payer after invite enable:', err));
+  } else {
+    stopMinecraftPayer();
+  }
 
   if (_reregisterCommands) {
     _reregisterCommands(next).catch(err => console.error('[InviteRewards] Failed to re-register commands after toggle:', err));

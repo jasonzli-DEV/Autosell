@@ -221,17 +221,29 @@ client.on('interactionCreate', async (interaction) => {
     process.exit(1);
   }
 
+  let startupInvitesEnabled = true;
   try {
-    await startMinecraftPayer();
+    const startupSettings = await getSettings();
+    startupInvitesEnabled = startupSettings.invitesEnabled !== false;
   } catch (err) {
-    console.warn(`[Minecraft] Could not connect to DonutSMP on startup: ${err.message}`);
-    console.warn('[Minecraft] Spawner trades and invite reward payouts will be unavailable until reconnected.');
-    logInfo(
-      'Minecraft Offline at Startup',
-      `Failed to connect to DonutSMP: ${err.message}\n\nSpawner trades and invite reward payouts will be unavailable until the bot reconnects.`,
-      [],
-      { category: 'invite' },
-    ).catch(() => null);
+    console.warn('Could not fetch settings to check invite status:', err.message);
+  }
+
+  if (startupInvitesEnabled) {
+    try {
+      await startMinecraftPayer();
+    } catch (err) {
+      console.warn(`[Minecraft] Could not connect to DonutSMP on startup: ${err.message}`);
+      console.warn('[Minecraft] Spawner trades and invite reward payouts will be unavailable until reconnected.');
+      logInfo(
+        'Minecraft Offline at Startup',
+        `Failed to connect to DonutSMP: ${err.message}\n\nSpawner trades and invite reward payouts will be unavailable until the bot reconnects.`,
+        [],
+        { category: 'invite' },
+      ).catch(() => null);
+    }
+  } else {
+    console.log('[Minecraft] Invite rewards are disabled — skipping Minecraft payer connection.');
   }
 
   try {

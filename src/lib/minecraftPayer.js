@@ -365,6 +365,10 @@ async function startMinecraftPayer() {
   return payer.connect();
 }
 
+function stopMinecraftPayer() {
+  payer.disconnect();
+}
+
 async function sendDonutPayment(ign, amount, parser) {
   return payer.sendPayment(ign, amount, parser);
 }
@@ -391,6 +395,7 @@ module.exports = {
   formatPacketTraceForLog,
   getPacketTrace,
   startMinecraftPayer,
+  stopMinecraftPayer,
   sendDonutPayment,
   getPayerBot,
   isPayerConnected,
